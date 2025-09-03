@@ -76,27 +76,86 @@ function isSpecialCardForStart(card: Card): boolean {
 }
 
 /**
+ * Get the color of a card suit
+ */
+function getCardColor(suit: Suit): 'red' | 'black' {
+  return suit === 'hearts' || suit === 'diamonds' ? 'red' : 'black';
+}
+
+/**
  * Validate if a card can be played on top of the current card
  */
-export function canPlayCard(cardToPlay: Card, topCard: Card | null, wildSuit: Suit | null): boolean {
+export function canPlayCard(cardToPlay: Card, topCard: Card | null, wildSuit: Suit | null, isFirstPlay?: boolean): boolean {
+  console.log('🔍 canPlayCard called:', {
+    cardToPlay: `${cardToPlay.rank} of ${cardToPlay.suit}`,
+    topCard: topCard ? `${topCard.rank} of ${topCard.suit}` : 'null',
+    wildSuit,
+    isFirstPlay
+  });
+  
   if (!topCard) {
-    return true; // Can play any card if no top card
+    // Pis Yedili: First play must be a club
+    if (isFirstPlay) {
+      const result = cardToPlay.suit === 'clubs';
+      console.log('  First play, must be club:', result);
+      return result;
+    }
+    console.log('  No top card, can play anything');
+    return true; // Can play any card if no top card (fallback)
   }
   
   // If there's a wild suit chosen (from Jack), must match that suit
   if (wildSuit) {
-    return cardToPlay.suit === wildSuit || cardToPlay.rank === 'J';
+    const result = cardToPlay.suit === wildSuit || cardToPlay.rank === 'J';
+    console.log('  Wild suit active:', wildSuit, 'Result:', result);
+    return result;
   }
   
-  // Normal matching: same suit or same rank
-  return cardToPlay.suit === topCard.suit || cardToPlay.rank === topCard.rank;
+  // Jacks are always playable (wild cards)
+  if (cardToPlay.rank === 'J') {
+    console.log('  Jack is always playable');
+    return true;
+  }
+  
+  // Check all three matching conditions:
+  // 1. Same suit (e.g., hearts on hearts)
+  // 2. Same rank/number (e.g., 3 on 3, K on K, 10 on 10)
+  // 3. Same color (red on red, black on black)
+  
+  // Debug: Log the raw values being compared
+  console.log('  Raw comparison values:', {
+    cardToPlayRank: cardToPlay.rank,
+    topCardRank: topCard.rank,
+    rankType: typeof cardToPlay.rank,
+    topRankType: typeof topCard.rank,
+    strictEqual: cardToPlay.rank === topCard.rank,
+    looseEqual: cardToPlay.rank == topCard.rank
+  });
+  
+  const suitMatch = cardToPlay.suit === topCard.suit;
+  const rankMatch = cardToPlay.rank === topCard.rank;
+  const cardColor = getCardColor(cardToPlay.suit);
+  const topCardColor = getCardColor(topCard.suit);
+  const colorMatch = cardColor === topCardColor;
+  
+  console.log('  Matching checks:', {
+    suitMatch: `${cardToPlay.suit} === ${topCard.suit} = ${suitMatch}`,
+    rankMatch: `"${cardToPlay.rank}" === "${topCard.rank}" = ${rankMatch}`,
+    colorMatch: `${cardColor} === ${topCardColor} = ${colorMatch}`
+  });
+  
+  // Card can be played if ANY of these conditions are true
+  const canPlay = suitMatch || rankMatch || colorMatch;
+  console.log('  Final result:', canPlay, '(suit:', suitMatch, 'rank:', rankMatch, 'color:', colorMatch, ')');
+  
+  return canPlay;
 }
 
 /**
  * Validate a player's move
  */
 export function validateMove(gameState: GameState, move: GameMove): { valid: boolean; reason?: string } {
-  const { players, currentPlayerIndex, topCard, wildSuit, drawCount, skipNext } = gameState;
+  const { players, currentPlayerIndex, topCard, wildSuit, drawCount } = gameState;
   const currentPlayer = players[currentPlayerIndex];
   
   // Check if it's the player's turn
@@ -152,9 +211,9 @@ export function validateMove(gameState: GameState, move: GameMove): { valid: boo
       return { valid: true };
     
     case 'SAY_MAU':
-      // Can say Mau when player has exactly 2 cards (after playing one, will have 1)
-      if (currentPlayer.hand.length !== 2) {
-        return { valid: false, reason: 'Can only say Mau when you have 2 cards' };
+      // Can say Tek when player has exactly 1 card
+      if (currentPlayer.hand.length !== 1) {
+        return { valid: false, reason: 'Can only say Tek when you have 1 card' };
       }
       
       return { valid: true };
@@ -208,7 +267,7 @@ export function applyMove(gameState: GameState, move: GameMove): GameState {
  * Handle playing a card
  */
 function handlePlayCard(gameState: GameState, cardToPlay: Card): GameState {
-  const newState = { ...gameState };
+  let newState = { ...gameState };
   const currentPlayer = newState.players[newState.currentPlayerIndex];
   
   // Remove card from player's hand
@@ -269,8 +328,9 @@ function handleDrawCard(gameState: GameState): GameState {
   currentPlayer.hand = [...currentPlayer.hand, ...drawnCards];
   currentPlayer.handCount = currentPlayer.hand.length;
   
-  // Reset draw count
+  // Reset draw count and seven stack
   newState.drawCount = 0;
+  newState.sevenStack = 0;
   
   // Move to next player
   newState.currentPlayerIndex = getNextPlayerIndex(newState);
@@ -296,20 +356,31 @@ function handleSpecialCardEffect(gameState: GameState, card: Card): GameState {
   const newState = { ...gameState };
   
   switch (card.rank) {
-    case '7': // Draw 2 cards (stackable)
-      newState.drawCount += 2;
+    case '7': // Draw 3 cards (stackable) - Pis Yedili rule
+      newState.sevenStack = (newState.sevenStack || 0) + 1;
+      newState.drawCount = newState.sevenStack * 3;
       break;
     
     case '8': // Skip next player
       newState.skipNext = true;
       break;
     
+    case '10': // Reverse direction - Pis Yedili rule
+      newState.direction = newState.direction === 'clockwise' ? 'counterclockwise' : 'clockwise';
+      break;
+    
     case 'J': // Wild card - choose suit (handled separately)
       // Suit will be chosen in a separate move
       break;
     
-    case 'A': // Reverse direction (in some variants)
-      newState.direction = newState.direction === 'clockwise' ? 'counterclockwise' : 'clockwise';
+    case 'A': // All other players draw 1 card - Pis Yedili rule
+      // This is handled server-side, client doesn't need to implement
+      break;
+    
+    default:
+      // Clear any stacked 7s when other cards are played
+      newState.sevenStack = 0;
+      newState.drawCount = 0;
       break;
   }
   
@@ -351,14 +422,41 @@ export function canPlayerMove(gameState: GameState, playerId: string): boolean {
 /**
  * Get valid cards that can be played from a hand
  */
-export function getValidCards(hand: Card[], topCard: Card | null, wildSuit: Suit | null, drawCount: number): Card[] {
-  // If there are accumulated draws, only 7s can be played
+export function getValidCards(hand: Card[], topCard: Card | null, wildSuit: Suit | null, drawCount: number, isFirstPlay?: boolean): Card[] {
+  console.log('📋 getValidCards called with:', {
+    handSize: hand.length,
+    topCard: topCard ? `${topCard.rank} of ${topCard.suit}` : 'null',
+    wildSuit,
+    drawCount,
+    isFirstPlay
+  });
+  
+  // Special case: If there are accumulated draws from 7s, only 7s can be played
   if (drawCount > 0) {
-    return hand.filter(card => card.rank === '7');
+    console.log('  ⚠️ Draw count is', drawCount, '- only 7s can be played to stack or player must draw');
+    const sevens = hand.filter(card => card.rank === '7');
+    console.log('  7s in hand:', sevens.map(c => `${c.rank} of ${c.suit}`));
+    return sevens;
   }
   
-  // Otherwise, return cards that match the current card
-  return hand.filter(card => canPlayCard(card, topCard, wildSuit));
+  // Log each card being checked
+  console.log('  Checking each card in hand:');
+  hand.forEach(card => {
+    const canPlay = canPlayCard(card, topCard, wildSuit, isFirstPlay);
+    console.log(`    ${card.rank} of ${card.suit}: ${canPlay ? '✅' : '❌'}`);
+  });
+  
+  // Filter cards that can be played
+  const validCards = hand.filter(card => canPlayCard(card, topCard, wildSuit, isFirstPlay));
+  
+  // Simple debug to see what's being validated
+  if (topCard) {
+    console.log(`📌 Valid cards for ${topCard.rank} of ${topCard.suit}:`, 
+      validCards.map(c => `${c.rank} of ${c.suit}`).join(', ') || 'NONE'
+    );
+  }
+  
+  return validCards;
 }
 
 /**

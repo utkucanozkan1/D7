@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { GameState, Player, Card as CardType, Suit } from '@/types/game';
 import { Card, CardBack, CardSlot } from './Card';
 import { PlayerHand } from './PlayerHand';
@@ -33,9 +33,36 @@ export function GameBoard({
   
   // Get valid cards that can be played
   const validCards = myPlayer 
-    ? getValidCards(myPlayer.hand, gameState.topCard, gameState.wildSuit, gameState.drawCount)
+    ? getValidCards(myPlayer.hand, gameState.topCard, gameState.wildSuit, gameState.drawCount, gameState.isFirstPlay)
     : [];
   const validCardIds = validCards.map(c => c.id);
+  
+  // Debug: Log validation state when top card changes
+  React.useEffect(() => {
+    if (gameState.topCard && myPlayer) {
+      console.log('🎮 Current game state:', {
+        topCard: `${gameState.topCard.rank} of ${gameState.topCard.suit}`,
+        myHand: myPlayer.hand.map(c => `${c.rank} of ${c.suit}`),
+        validCards: validCards.map(c => `${c.rank} of ${c.suit}`),
+        validCardIds: validCardIds,
+        wildSuit: gameState.wildSuit,
+        drawCount: gameState.drawCount
+      });
+      
+      // Check specifically for matching ranks
+      const matchingRanks = myPlayer.hand.filter(c => c.rank === gameState.topCard.rank);
+      if (matchingRanks.length > 0) {
+        console.log('⚠️ RANK MATCH CHECK:', {
+          topCard: `${gameState.topCard.rank} of ${gameState.topCard.suit}`,
+          yourMatchingCards: matchingRanks.map(c => `${c.rank} of ${c.suit}`),
+          shouldBeValid: true,
+          actuallyValid: matchingRanks.some(c => validCardIds.includes(c.id)),
+          drawCount: gameState.drawCount,
+          wildSuit: gameState.wildSuit
+        });
+      }
+    }
+  }, [gameState.topCard?.id, myPlayer?.hand]);
 
   // Arrange players around the table
   const arrangePlayersAroundTable = () => {
@@ -65,6 +92,18 @@ export function GameBoard({
   const positions = arrangePlayersAroundTable();
   const currentTurnPlayer = gameState.players[gameState.currentPlayerIndex];
   const canPlayAnyCard = validCards.length > 0;
+
+  // Debug draw conditions
+  React.useEffect(() => {
+    if (isMyTurn) {
+      console.log('🎯 Draw conditions debug:');
+      console.log('  - isMyTurn:', isMyTurn);
+      console.log('  - canPlayAnyCard:', canPlayAnyCard);
+      console.log('  - gameState.drawCount:', gameState.drawCount);
+      console.log('  - validCards count:', validCards.length);
+      console.log('  - Draw click condition:', !canPlayAnyCard || gameState.drawCount > 0);
+    }
+  }, [isMyTurn, canPlayAnyCard, gameState.drawCount, validCards.length]);
 
   const handleCardPlay = (card: CardType) => {
     if (!isMyTurn) return;
@@ -172,9 +211,9 @@ export function GameBoard({
               <div className="flex flex-col items-center space-y-2">
                 <CardBack 
                   size="large"
-                  onClick={isMyTurn && !canPlayAnyCard ? onDrawCard : undefined}
+                  onClick={isMyTurn && (!canPlayAnyCard || gameState.drawCount > 0) ? onDrawCard : undefined}
                   className={`${
-                    isMyTurn && !canPlayAnyCard 
+                    isMyTurn && (!canPlayAnyCard || gameState.drawCount > 0)
                       ? 'ring-2 ring-yellow-400 ring-opacity-60 cursor-pointer' 
                       : ''
                   }`}
@@ -182,9 +221,9 @@ export function GameBoard({
                 <span className="text-white text-sm">
                   {gameState.deck.length} cards
                 </span>
-                {isMyTurn && !canPlayAnyCard && (
+                {isMyTurn && (!canPlayAnyCard || gameState.drawCount > 0) && (
                   <div className="text-yellow-300 text-xs animate-pulse">
-                    Click to draw
+                    {gameState.drawCount > 0 ? `Click to draw +${gameState.drawCount}` : 'Click to draw'}
                   </div>
                 )}
               </div>
@@ -209,12 +248,12 @@ export function GameBoard({
             {/* Action buttons */}
             {isMyTurn && (
               <div className="flex space-x-3">
-                {myPlayer?.hand.length === 2 && (
+                {myPlayer?.hand.length === 1 && (
                   <button
                     onClick={onSayMau}
                     className="bg-gradient-to-r from-yellow-400 to-yellow-600 text-black font-semibold py-2 px-4 rounded-lg hover:from-yellow-300 hover:to-yellow-500 transition-all duration-200 shadow-lg"
                   >
-                    Say Mau!
+                    Say Tek!
                   </button>
                 )}
                 

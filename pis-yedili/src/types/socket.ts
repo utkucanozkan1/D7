@@ -14,6 +14,7 @@ export interface ClientToServerEvents {
   'start-game': (roomId: string) => void;
   'make-move': (roomId: string, move: GameMove) => void;
   'player-ready': (roomId: string, ready: boolean) => void;
+  'fill-with-bots': (roomId: string) => void;
   
   // Chat
   'send-message': (roomId: string, message: string) => void;

@@ -129,17 +129,30 @@ class SocketManager {
   public emit(event: string, ...args: any[]) {
     console.log(`📤 Attempting to emit ${event}:`, args);
     console.log(`🔍 Socket connected: ${this.socket?.connected}, Socket ID: ${this.socket?.id}`);
+    console.log(`🔍 Socket instance:`, this.socket);
+    console.log(`🔍 Socket rooms:`, (this.socket as any)?.rooms);
     
     if (this.socket?.connected) {
       try {
         // Direct emit call
+        console.log(`🚀 Calling socket.emit('${event}', ...${JSON.stringify(args)})`);
         this.socket.emit(event, ...args);
         console.log(`✅ Emitted ${event} successfully`);
+        
+        // Add a small delay and check if any acknowledgment or response comes back
+        setTimeout(() => {
+          console.log(`⏰ 1 second after emitting ${event} - socket still connected: ${this.socket?.connected}`);
+        }, 1000);
       } catch (error) {
         console.error(`❌ Error emitting ${event}:`, error);
       }
     } else {
       console.warn(`❌ Cannot emit ${event}: socket not connected`);
+      console.warn(`❌ Socket state:`, {
+        exists: !!this.socket,
+        connected: this.socket?.connected,
+        id: this.socket?.id
+      });
     }
   }
 
