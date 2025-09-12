@@ -167,7 +167,7 @@ export default function LobbyPage() {
     setFilteredRooms(filtered);
   }, [rooms, searchQuery, filters]);
 
-  const handleCreateRoom = (roomData: { name: string; maxPlayers: number; isPrivate: boolean }) => {
+  const handleCreateRoom = (roomData: { name: string; maxPlayers: number; isPrivate: boolean; maxRounds: number }) => {
     console.log('🏠 Creating room with data:', roomData);
     const socketManager = getSocketManager();
     const socket = socketManager.getSocket();

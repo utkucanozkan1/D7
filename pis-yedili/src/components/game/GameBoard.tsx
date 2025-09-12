@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { GameState, Player, Card as CardType, Suit } from '@/types/game';
 import { Card, CardBack, CardSlot } from './Card';
 import { PlayerHand } from './PlayerHand';
+import { WinnerModal } from './WinnerModal';
 import { getValidCards } from '@/utils/gameLogic';
 import { Clock, RotateCcw, Users, MessageCircle } from 'lucide-react';
 
@@ -14,6 +15,11 @@ interface GameBoardProps {
   onDrawCard: () => void;
   onChooseSuit: (suit: Suit) => void;
   onSayMau: () => void;
+  onContinueToNextRound?: () => void;
+  onNewGame?: () => void;
+  onLeaveLobby?: () => void;
+  showWinnerModal?: boolean;
+  onCloseWinnerModal?: () => void;
 }
 
 export function GameBoard({
@@ -22,7 +28,12 @@ export function GameBoard({
   onCardPlay,
   onDrawCard,
   onChooseSuit,
-  onSayMau
+  onSayMau,
+  onContinueToNextRound,
+  onNewGame,
+  onLeaveLobby,
+  showWinnerModal = false,
+  onCloseWinnerModal
 }: GameBoardProps) {
   const [showSuitSelector, setShowSuitSelector] = useState(false);
   const [selectedCard, setSelectedCard] = useState<CardType | null>(null);
@@ -50,7 +61,7 @@ export function GameBoard({
       });
       
       // Check specifically for matching ranks
-      const matchingRanks = myPlayer.hand.filter(c => c.rank === gameState.topCard.rank);
+      const matchingRanks = myPlayer.hand.filter(c => c.rank === gameState.topCard?.rank);
       if (matchingRanks.length > 0) {
         console.log('⚠️ RANK MATCH CHECK:', {
           topCard: `${gameState.topCard.rank} of ${gameState.topCard.suit}`,
@@ -93,17 +104,6 @@ export function GameBoard({
   const currentTurnPlayer = gameState.players[gameState.currentPlayerIndex];
   const canPlayAnyCard = validCards.length > 0;
 
-  // Debug draw conditions
-  React.useEffect(() => {
-    if (isMyTurn) {
-      console.log('🎯 Draw conditions debug:');
-      console.log('  - isMyTurn:', isMyTurn);
-      console.log('  - canPlayAnyCard:', canPlayAnyCard);
-      console.log('  - gameState.drawCount:', gameState.drawCount);
-      console.log('  - validCards count:', validCards.length);
-      console.log('  - Draw click condition:', !canPlayAnyCard || gameState.drawCount > 0);
-    }
-  }, [isMyTurn, canPlayAnyCard, gameState.drawCount, validCards.length]);
 
   const handleCardPlay = (card: CardType) => {
     if (!isMyTurn) return;
@@ -211,19 +211,24 @@ export function GameBoard({
               <div className="flex flex-col items-center space-y-2">
                 <CardBack 
                   size="large"
-                  onClick={isMyTurn && (!canPlayAnyCard || gameState.drawCount > 0) ? onDrawCard : undefined}
+                  onClick={isMyTurn ? onDrawCard : undefined}
                   className={`${
-                    isMyTurn && (!canPlayAnyCard || gameState.drawCount > 0)
-                      ? 'ring-2 ring-yellow-400 ring-opacity-60 cursor-pointer' 
+                    isMyTurn
+                      ? 'ring-2 ring-yellow-400 ring-opacity-60 cursor-pointer hover:ring-yellow-300' 
                       : ''
                   }`}
                 />
                 <span className="text-white text-sm">
                   {gameState.deck.length} cards
                 </span>
-                {isMyTurn && (!canPlayAnyCard || gameState.drawCount > 0) && (
+                {isMyTurn && (
                   <div className="text-yellow-300 text-xs animate-pulse">
-                    {gameState.drawCount > 0 ? `Click to draw +${gameState.drawCount}` : 'Click to draw'}
+                    {gameState.drawCount > 0 
+                      ? `Click to draw +${gameState.drawCount}` 
+                      : canPlayAnyCard 
+                        ? 'Click to draw (strategic)'
+                        : 'Click to draw'
+                    }
                   </div>
                 )}
               </div>
@@ -257,12 +262,21 @@ export function GameBoard({
                   </button>
                 )}
                 
-                {gameState.drawCount > 0 && !canPlayAnyCard && (
+                {!canPlayAnyCard && (
                   <button
                     onClick={onDrawCard}
-                    className="bg-gradient-to-r from-red-500 to-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:from-red-400 hover:to-red-500 transition-all duration-200 shadow-lg"
+                    className="bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:from-blue-400 hover:to-blue-500 transition-all duration-200 shadow-lg"
                   >
-                    Draw +{gameState.drawCount}
+                    {gameState.drawCount > 0 ? `Draw +${gameState.drawCount}` : 'Draw Card'}
+                  </button>
+                )}
+                
+                {canPlayAnyCard && gameState.drawCount === 0 && (
+                  <button
+                    onClick={onDrawCard}
+                    className="bg-gradient-to-r from-purple-500 to-purple-600 text-white font-semibold py-2 px-4 rounded-lg hover:from-purple-400 hover:to-purple-500 transition-all duration-200 shadow-lg opacity-80"
+                  >
+                    Strategic Draw
                   </button>
                 )}
               </div>
@@ -337,6 +351,22 @@ export function GameBoard({
               </div>
             </div>
           </div>
+        )}
+
+        {/* Winner Modal */}
+        {showWinnerModal && gameState.winner && (
+          <WinnerModal
+            winner={gameState.players.find(p => p.id === gameState.winner)!}
+            isRoundWin={!gameState.isGameComplete}
+            isGameComplete={gameState.isGameComplete}
+            currentRound={gameState.currentRound}
+            maxRounds={gameState.maxRounds}
+            roundWinners={gameState.roundWinners}
+            players={gameState.players}
+            onContinue={onContinueToNextRound}
+            onNewGame={onNewGame}
+            onLeaveLobby={onLeaveLobby}
+          />
         )}
       </div>
     </div>

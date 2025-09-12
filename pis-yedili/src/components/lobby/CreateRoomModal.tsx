@@ -5,13 +5,14 @@ import { X, Users, Lock, Unlock, Plus, Minus } from 'lucide-react';
 
 interface CreateRoomModalProps {
   onClose: () => void;
-  onCreate: (roomData: { name: string; maxPlayers: number; isPrivate: boolean }) => void;
+  onCreate: (roomData: { name: string; maxPlayers: number; isPrivate: boolean; maxRounds: number }) => void;
 }
 
 export function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
   const [roomName, setRoomName] = useState('');
   const [maxPlayers, setMaxPlayers] = useState(4);
   const [isPrivate, setIsPrivate] = useState(false);
+  const [maxRounds, setMaxRounds] = useState(3);
   const [isCreating, setIsCreating] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -28,6 +29,7 @@ export function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
         name: roomName.trim(),
         maxPlayers,
         isPrivate,
+        maxRounds,
       });
     } catch (error) {
       console.error('Error creating room:', error);
@@ -40,6 +42,13 @@ export function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
     const newValue = maxPlayers + delta;
     if (newValue >= 2 && newValue <= 6) {
       setMaxPlayers(newValue);
+    }
+  };
+
+  const adjustMaxRounds = (delta: number) => {
+    const newValue = maxRounds + delta;
+    if (newValue >= 1 && newValue <= 10) {
+      setMaxRounds(newValue);
     }
   };
 
@@ -127,6 +136,46 @@ export function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
             </div>
             <p className="text-xs text-blue-200 mt-1">
               Choose between 2-6 players (recommended: 3-4 players)
+            </p>
+          </div>
+
+          {/* Number of Rounds */}
+          <div>
+            <label className="block text-sm font-medium text-white mb-2">
+              Number of Rounds
+            </label>
+            <div className="flex items-center justify-between bg-white/20 border border-white/30 rounded-lg p-3">
+              <div className="flex items-center space-x-2 text-white">
+                <span className="text-lg">🏆</span>
+                <span>Rounds</span>
+              </div>
+              
+              <div className="flex items-center space-x-3">
+                <button
+                  type="button"
+                  onClick={() => adjustMaxRounds(-1)}
+                  disabled={maxRounds <= 1}
+                  className="p-1 text-white hover:bg-white/20 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+                
+                <span className="text-white font-semibold text-lg w-8 text-center">
+                  {maxRounds}
+                </span>
+                
+                <button
+                  type="button"
+                  onClick={() => adjustMaxRounds(1)}
+                  disabled={maxRounds >= 10}
+                  className="p-1 text-white hover:bg-white/20 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-blue-200 mt-1">
+              Play 1-10 rounds (winner determined by most round wins)
             </p>
           </div>
 

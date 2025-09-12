@@ -24,6 +24,7 @@ export default function GamePage({ params }: GamePageProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [needsToJoin, setNeedsToJoin] = useState(false);
   const [playerName, setPlayerName] = useState<string>('');
+  const [showWinnerModal, setShowWinnerModal] = useState(false);
   const loadingRef = useRef(true);
   const roomRef = useRef<Room | null>(null);
 
@@ -64,13 +65,24 @@ export default function GamePage({ params }: GamePageProps) {
 
     // Handle game events
     socketManager.on('game-started', (newGameState: GameState) => {
+      console.log('🎮 Game started event received:', {
+        status: newGameState.status,
+        currentRound: newGameState.currentRound,
+        maxRounds: newGameState.maxRounds,
+        playersCount: newGameState.players.length
+      });
+      console.log('🔄 Clearing loading state from game-started event');
       setGameState(newGameState);
       setIsLoading(false);
       loadingRef.current = false;
+      // Close winner modal if it's open (for next round starts)
+      setShowWinnerModal(false);
+      setError(''); // Clear any errors
     });
 
     socketManager.on('game-state-updated', (newGameState: GameState) => {
       setGameState(newGameState);
+      setIsLoading(false); // Ensure loading is cleared when game state updates
     });
 
     socketManager.on('move-made', (newGameState: GameState, move: GameMove, success: boolean, reason?: string) => {
@@ -82,10 +94,25 @@ export default function GamePage({ params }: GamePageProps) {
       }
     });
 
-    socketManager.on('game-ended', (finalGameState: GameState, winner: Player | null) => {
+    socketManager.on('round-ended', (finalGameState: GameState, winner: Player, roundNumber: number) => {
       setGameState(finalGameState);
-      // Show game end notification
-      console.log('Game ended, winner:', winner);
+      setShowWinnerModal(true);
+      console.log(`Round ${roundNumber} ended, winner: ${winner.name}`);
+    });
+    
+    socketManager.on('final-game-ended', (finalGameState: GameState, winner: Player, roundWinners: string[]) => {
+      setGameState(finalGameState);
+      setShowWinnerModal(true);
+      console.log('Final game ended, overall winner:', winner.name);
+    });
+
+    socketManager.on('next-round-started', ({ roundNumber, totalRounds }: { roundNumber: number, totalRounds: number }) => {
+      console.log(`🆕 Next round started: Round ${roundNumber} of ${totalRounds}`);
+      console.log('🔄 Clearing loading state from next-round-started event');
+      setShowWinnerModal(false);
+      setError(''); // Clear any errors
+      setIsLoading(false); // Ensure loading is cleared
+      loadingRef.current = false;
     });
 
     socketManager.on('room-joined', (joinedRoom: Room, playerId: string) => {
@@ -112,9 +139,11 @@ export default function GamePage({ params }: GamePageProps) {
     });
 
     socketManager.on('error', (error) => {
+      console.error('❌ Socket error received:', error);
       setError(error.message);
       setIsLoading(false);
       loadingRef.current = false;
+      setShowWinnerModal(false); // Close any modals on error
     });
 
     socketManager.on('game-error', (roomId: string, errorMessage: string, playerId?: string) => {
@@ -192,7 +221,9 @@ export default function GamePage({ params }: GamePageProps) {
       socketManager.off('game-started');
       socketManager.off('game-state-updated');
       socketManager.off('move-made');
-      socketManager.off('game-ended');
+      socketManager.off('round-ended');
+      socketManager.off('final-game-ended');
+      socketManager.off('next-round-started');
       socketManager.off('room-joined');
       socketManager.off('room-updated');
       socketManager.off('room-state');
@@ -326,6 +357,44 @@ export default function GamePage({ params }: GamePageProps) {
     console.log('Start-game event emitted via manager');
   };
 
+  const handleContinueToNextRound = () => {
+    console.log('🔄 Continue to next round requested');
+    const socketManager = getSocketManager();
+    
+    // Set loading state to show progress
+    setIsLoading(true);
+    loadingRef.current = true;
+    
+    // Emit the continue request
+    console.log('📡 Emitting continue-to-next-round event to server with roomId:', roomId);
+    socketManager.emit('continue-to-next-round', roomId);
+    
+    // Close modal immediately for better UX
+    setShowWinnerModal(false);
+    
+    // Add timeout fallback in case server doesn't respond
+    setTimeout(() => {
+      // If still loading after 10 seconds, there's likely an error
+      if (loadingRef.current && gameState?.status === 'finished') {
+        console.warn('⚠️ Continue to next round timed out, clearing loading state');
+        setIsLoading(false);
+        loadingRef.current = false;
+        setError('Failed to start next round. Please try refreshing the page.');
+      }
+    }, 10000);
+    
+    console.log('🔄 Continue request sent, waiting for server response...');
+  };
+
+  const handleNewGame = () => {
+    // Start a fresh game (restart from round 1)
+    router.push('/lobby');
+  };
+
+  const handleLeaveLobby = () => {
+    router.push('/lobby');
+  };
+
   const handleFillWithBots = () => {
     console.log('🤖 Fill with bots clicked');
     console.log('Room ID:', roomId);
@@ -421,7 +490,7 @@ export default function GamePage({ params }: GamePageProps) {
     setIsLoading(true);
   };
 
-  if (isLoading) {
+  if (isLoading && !gameState && !room) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-green-800 flex items-center justify-center">
         <div className="text-center">
@@ -457,8 +526,8 @@ export default function GamePage({ params }: GamePageProps) {
     );
   }
 
-  // If we have a game in progress, show the game board
-  if (gameState && gameState.status === 'playing') {
+  // If we have a game in progress or finished, show the game board
+  if (gameState && (gameState.status === 'playing' || gameState.status === 'finished')) {
     return (
       <div className="relative">
         {/* Header overlay */}
@@ -473,7 +542,9 @@ export default function GamePage({ params }: GamePageProps) {
               </Link>
               <div>
                 <h1 className="text-white font-bold text-lg">{room?.name}</h1>
-                <p className="text-blue-200 text-sm">Game in progress</p>
+                <p className="text-blue-200 text-sm">
+                  {gameState.status === 'finished' ? 'Round finished' : 'Game in progress'}
+                </p>
               </div>
             </div>
 
@@ -495,6 +566,11 @@ export default function GamePage({ params }: GamePageProps) {
           onDrawCard={handleDrawCard}
           onChooseSuit={handleChooseSuit}
           onSayMau={handleSayMau}
+          onContinueToNextRound={handleContinueToNextRound}
+          onNewGame={handleNewGame}
+          onLeaveLobby={handleLeaveLobby}
+          showWinnerModal={showWinnerModal}
+          onCloseWinnerModal={() => setShowWinnerModal(false)}
         />
       </div>
     );
@@ -553,7 +629,7 @@ export default function GamePage({ params }: GamePageProps) {
     );
   }
 
-  // Show waiting room if game hasn't started
+  // Show waiting room if game hasn't started or if we need to show room info without finished game state
   if (room && !gameState) {
     const currentPlayer = room.players.find(p => p.id === currentPlayerId);
     const allPlayersReady = room.players.length >= 2 && room.players.every(p => p.isReady);

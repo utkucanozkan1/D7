@@ -4,7 +4,10 @@ import {
   applyMove, 
   validateMove, 
   canPlayerMove,
-  shouldEndGame 
+  shouldEndGame,
+  completeRound,
+  startNextRound,
+  checkRoundCompletion
 } from '@/utils/gameLogic';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -27,8 +30,14 @@ export class GameManager {
       throw new Error('All players must be ready');
     }
 
-    // Initialize game state
-    const gameState = initializeGame(room.id, room.players);
+    // Initialize game state with round configuration
+    const gameState = initializeGame(
+      room.id, 
+      room.players, 
+      room.maxRounds || 1, 
+      1, 
+      []
+    );
     
     // Store the game
     this.games.set(room.id, gameState);
@@ -36,7 +45,7 @@ export class GameManager {
     // Start turn timer
     this.startTurnTimer(gameState);
     
-    console.log(`Game started for room ${room.id} with ${room.players.length} players`);
+    console.log(`Game started for room ${room.id} with ${room.players.length} players, ${room.maxRounds || 1} rounds`);
     
     return gameState;
   }
@@ -204,6 +213,29 @@ export class GameManager {
   }
 
   /**
+   * Continue to next round
+   */
+  public continueToNextRound(roomId: string): GameState | null {
+    const gameState = this.games.get(roomId);
+    if (!gameState) return null;
+
+    if (gameState.status !== 'finished' || gameState.isGameComplete) {
+      return null; // Can't continue if not at end of round or if game is complete
+    }
+
+    // Start next round
+    const nextRoundGameState = startNextRound(gameState);
+    this.games.set(roomId, nextRoundGameState);
+    
+    // Start turn timer for new round
+    this.startTurnTimer(nextRoundGameState);
+    
+    console.log(`Starting round ${nextRoundGameState.currentRound} for room ${roomId}`);
+    
+    return nextRoundGameState;
+  }
+
+  /**
    * Clean up finished games
    */
   public cleanupGame(roomId: string): void {
@@ -283,15 +315,38 @@ export class GameManager {
             });
           }
 
-          // Check for game end
+          // Check for round/game end
           if (newState.winner) {
             const winner = newState.players.find(p => p.id === newState.winner);
             if (winner) {
-              events.push({
-                type: 'GAME_ENDED',
-                winner,
-                gameState: newState
-              });
+              const completion = checkRoundCompletion(newState);
+              
+              if (completion.gameComplete) {
+                // Complete the round and determine final winner
+                const finalGameState = completeRound(newState, newState.winner);
+                this.games.set(newState.roomId, finalGameState);
+                
+                const finalWinner = finalGameState.players.find(p => p.id === finalGameState.winner);
+                if (finalWinner) {
+                  events.push({
+                    type: 'FINAL_GAME_ENDED',
+                    winner: finalWinner,
+                    gameState: finalGameState,
+                    roundWinners: finalGameState.roundWinners || []
+                  });
+                }
+              } else {
+                // Just a round end
+                const roundCompleteState = completeRound(newState, newState.winner);
+                this.games.set(newState.roomId, roundCompleteState);
+                
+                events.push({
+                  type: 'ROUND_ENDED',
+                  winner,
+                  gameState: roundCompleteState,
+                  roundNumber: roundCompleteState.currentRound || 1
+                });
+              }
             }
           }
         }

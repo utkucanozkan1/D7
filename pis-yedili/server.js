@@ -45,6 +45,18 @@ function shuffleDeck(deck) {
   return shuffled;
 }
 
+// Calculate penalty points for remaining cards in hand
+function calculatePenaltyPoints(hand) {
+  return hand.reduce((total, card) => {
+    switch (card.rank) {
+      case 'A': return total + 11;
+      case 'K': case 'Q': case 'J': return total + 10;
+      case '7': case '8': return total + 20; // Special cards worth more
+      default: return total + parseInt(card.rank);
+    }
+  }, 0);
+}
+
 // Deal cards to players
 function dealCards(deck, playerCount, cardsPerPlayer = 7) {
   const hands = Array(playerCount).fill(null).map(() => []);
@@ -146,6 +158,7 @@ app.prepare().then(() => {
     socket.on('start-game', (roomId) => handleStartGame(socket, roomId));
     socket.on('fill-with-bots', (roomId) => handleFillWithBots(socket, roomId));
     socket.on('make-move', (roomId, move) => handleMakeMove(socket, roomId, move));
+    socket.on('continue-to-next-round', (roomId) => handleContinueToNextRound(socket, roomId));
 
     // Connection events
     socket.on('ping', () => socket.emit('pong'));
@@ -176,6 +189,9 @@ app.prepare().then(() => {
         gameInProgress: false,
         createdAt: new Date(),
         createdBy: socket.id,
+        maxRounds: roomData.maxRounds || 1,
+        currentRound: 1,
+        roundWinners: []
       };
 
       rooms.set(roomId, room);
@@ -334,6 +350,7 @@ app.prepare().then(() => {
       room.players = room.players.filter(p => p.id !== playerId);
       
       if (room.players.length === 0) {
+        console.log(`🗑️ ROOM DELETION: Room ${roomId} deleted (empty) - triggered by handleLeaveRoom`);
         rooms.delete(roomId);
         gameStates.delete(roomId);
         console.log(`Room ${roomId} deleted (empty)`);
@@ -464,6 +481,7 @@ app.prepare().then(() => {
       io.to(roomId).emit('room-deleted', roomId);
       
       // Remove the room
+      console.log(`🗑️ ROOM DELETION: Room ${roomId} deleted (handleDeleteRoom) by socket ${socket.id}`);
       rooms.delete(roomId);
       gameStates.delete(roomId);
       
@@ -608,8 +626,15 @@ app.prepare().then(() => {
   }
 
   function handleStartGame(socket, roomId) {
+    console.log(`🎮 handleStartGame called for room ${roomId} by socket ${socket.id}`);
     const room = rooms.get(roomId);
     const playerId = socket.data.playerId;
+    console.log(`🔍 Start game data:`, {
+      roomExists: !!room,
+      playerId,
+      roomPlayersCount: room?.players?.length || 0,
+      gameInProgress: room?.gameInProgress
+    });
 
     if (!room) {
       socket.emit('error', { 
@@ -705,7 +730,8 @@ app.prepare().then(() => {
         hasDrawnThisTurn: false,
         saidMau: false, // Keep for compatibility, but use saidTek for Pis Yedili
         saidTek: false, // Pis Yedili: declare "tek" when down to 1 card
-        score: 0 // Running score for the game
+        score: p.score || 0, // Running score for the game (preserve from previous rounds)
+        roundScore: 0 // Points from current round
       })),
       currentPlayerIndex: startingPlayerIndex,
       direction: 'clockwise',
@@ -723,6 +749,10 @@ app.prepare().then(() => {
       winner: null,
       turnStartTime: new Date(),
       turnTimeLimit: 30,
+      maxRounds: room.maxRounds || 1,
+      currentRound: room.currentRound || 1,
+      roundWinners: room.roundWinners || [],
+      isGameComplete: false,
       rules: {
         maxPlayers: room.maxPlayers,
         initialHandSize: 7,
@@ -755,10 +785,16 @@ app.prepare().then(() => {
     rooms.set(roomId, room);
     gameStates.set(roomId, gameState);
 
+    console.log(`📡 Emitting game-started event to room ${roomId}`, {
+      gameId: gameState.id,
+      status: gameState.status,
+      currentRound: gameState.currentRound,
+      playersCount: gameState.players.length
+    });
     io.to(roomId).emit('game-started', gameState);
     broadcastRoomsList();
 
-    console.log(`Game started for room ${roomId} by ${playerId}`);
+    console.log(`✅ Game started for room ${roomId} by ${playerId}`);
     
     // Check if current player is a bot and process their turn
     setTimeout(() => processBotTurn(roomId), 1000);
@@ -767,6 +803,7 @@ app.prepare().then(() => {
   function handleMakeMove(socket, roomId, move) {
     try {
       console.log(`🎯 Received make-move from ${socket.id}:`, move);
+      console.log(`🔍 Room access check - roomId: ${roomId}, rooms exist: ${rooms.has(roomId)}, gameStates exist: ${gameStates.has(roomId)}`);
       
       const gameState = gameStates.get(roomId);
       const playerId = socket.data.playerId;
@@ -806,13 +843,72 @@ app.prepare().then(() => {
         io.to(roomId).emit('move-made', gameState, move, true);
         io.to(roomId).emit('game-state-updated', gameState);
         
-        // Check if game ended
+        // Check if round ended
         if (currentPlayer.handCount === 0) {
+          console.log(`🏆 HUMAN PLAYER WON: ${currentPlayer.name} (${currentPlayer.id}) won the round in room ${roomId}`);
+          const currentRound = gameState.currentRound || 1;
+          const maxRounds = gameState.maxRounds || 1;
+          const newRoundWinners = [...(gameState.roundWinners || []), currentPlayer.id];
+          console.log(`📊 Round info: current=${currentRound}, max=${maxRounds}, complete=${currentRound >= maxRounds}`);
+          
+          // Calculate scores for all players based on remaining cards
+          gameState.players = gameState.players.map(player => {
+            const roundScore = player.id === currentPlayer.id ? 0 : calculatePenaltyPoints(player.hand);
+            const totalScore = (player.score || 0) + roundScore;
+            
+            return {
+              ...player,
+              roundScore,
+              score: totalScore
+            };
+          });
+          
           gameState.status = 'finished';
           gameState.winner = currentPlayer.id;
           gameState.finishedAt = new Date();
-          io.to(roomId).emit('game-ended', gameState, currentPlayer);
-          console.log(`🏆 Game ended, winner: ${currentPlayer.name}`);
+          gameState.roundWinners = newRoundWinners;
+          
+          if (currentRound >= maxRounds) {
+            // Game complete - determine overall winner (lowest score wins)
+            const overallWinner = gameState.players.reduce((best, player) => {
+              const bestScore = best.score || 0;
+              const playerScore = player.score || 0;
+              return playerScore < bestScore ? player : best;
+            });
+            
+            gameState.winner = overallWinner.id;
+            gameState.isGameComplete = true;
+            
+            io.to(roomId).emit('final-game-ended', gameState, overallWinner, newRoundWinners);
+            console.log(`🏆 Final game ended, overall winner: ${overallWinner.name} with ${overallWinner.score} points`);
+            
+            // Update room status
+            const room = rooms.get(roomId);
+            if (room) {
+              room.gameInProgress = false;
+              rooms.set(roomId, room);
+              broadcastRoomsList();
+            }
+          } else {
+            // Round ended but game continues
+            // Update room status for round end
+            const room = rooms.get(roomId);
+            console.log(`🔍 HUMAN ROUND END - Room found: ${!!room}, Room ID: ${roomId}`);
+            if (room) {
+              console.log(`🔄 Updating room state for human win - gameInProgress: ${room.gameInProgress} -> false`);
+              room.gameInProgress = false; // Mark game as paused between rounds
+              room.currentRound = currentRound;
+              room.roundWinners = gameState.roundWinners;
+              rooms.set(roomId, room);
+              console.log(`✅ Room state updated for human win, rooms count: ${rooms.size}`);
+              broadcastRoomsList();
+            } else {
+              console.log(`❌ CRITICAL: Room ${roomId} not found when human won round!`);
+            }
+            
+            io.to(roomId).emit('round-ended', gameState, currentPlayer, currentRound);
+            console.log(`🎯 Round ${currentRound} ended, winner: ${currentPlayer.name}`);
+          }
           return;
         }
         
@@ -830,17 +926,38 @@ app.prepare().then(() => {
 
   function processBotTurn(roomId) {
     try {
+      console.log(`🤖 processBotTurn called for room ${roomId}`);
+      console.log(`🔍 Available game states:`, Array.from(gameStates.keys()));
       const gameState = gameStates.get(roomId);
-      if (!gameState || gameState.status !== 'playing') {
+      if (!gameState) {
+        console.log(`🤖 No game state found for room ${roomId}`);
+        console.log(`🔍 Current game states:`, Array.from(gameStates.entries()).map(([k, v]) => ({ roomId: k, status: v.status })));
+        return;
+      }
+      if (gameState.status !== 'playing') {
+        console.log(`🤖 Game not playing, status: ${gameState.status}`);
         return;
       }
 
       const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-      if (!currentPlayer || !currentPlayer.isBot) {
+      if (!currentPlayer) {
+        console.log(`🤖 No current player found, index: ${gameState.currentPlayerIndex}`);
+        console.log(`🤖 Available players:`, gameState.players.map((p, i) => ({ index: i, name: p.name, isBot: p.isBot })));
+        return;
+      }
+      if (!currentPlayer.isBot) {
+        console.log(`🤖 Current player ${currentPlayer.name} is not a bot, skipping`);
+        console.log(`🤖 Player details:`, { name: currentPlayer.name, isBot: currentPlayer.isBot, id: currentPlayer.id });
         return; // Not a bot's turn
       }
 
       console.log(`🤖 Processing bot turn for ${currentPlayer.name} in room ${roomId}`);
+      console.log(`🤖 Bot player details:`, {
+        name: currentPlayer.name,
+        handCount: currentPlayer.handCount,
+        actualHandSize: currentPlayer.hand ? currentPlayer.hand.length : 'unknown',
+        isBot: currentPlayer.isBot
+      });
       
       // Bot AI logic
       const botMove = getBotMove(gameState, currentPlayer);
@@ -849,7 +966,9 @@ app.prepare().then(() => {
         console.log(`🤖 Bot ${currentPlayer.name} making move:`, botMove);
         
         // Apply the bot's move
+        console.log(`🎮 Applying bot move:`, botMove);
         const success = applyMove(gameState, botMove);
+        console.log(`🎮 Bot move applied, success:`, success);
         
         if (success) {
           // Update game state
@@ -861,56 +980,136 @@ app.prepare().then(() => {
           
           // Check if game ended
           if (currentPlayer.handCount === 0) {
+            const currentRound = gameState.currentRound || 1;
+            const maxRounds = gameState.maxRounds || 1;
+            const newRoundWinners = [...(gameState.roundWinners || []), currentPlayer.id];
+            
+            // Calculate scores for all players based on remaining cards
+            gameState.players = gameState.players.map(player => {
+              const roundScore = player.id === currentPlayer.id ? 0 : calculatePenaltyPoints(player.hand);
+              const totalScore = (player.score || 0) + roundScore;
+              
+              return {
+                ...player,
+                roundScore,
+                score: totalScore
+              };
+            });
+            
             gameState.status = 'finished';
             gameState.winner = currentPlayer.id;
             gameState.finishedAt = new Date();
-            io.to(roomId).emit('game-ended', gameState, currentPlayer);
+            gameState.roundWinners = newRoundWinners;
+            
+            if (currentRound >= maxRounds) {
+              // Game complete - determine overall winner (lowest score wins)
+              const overallWinner = gameState.players.reduce((best, player) => {
+                const bestScore = best.score || 0;
+                const playerScore = player.score || 0;
+                return playerScore < bestScore ? player : best;
+              });
+              
+              gameState.winner = overallWinner.id;
+              gameState.isGameComplete = true;
+              
+              io.to(roomId).emit('final-game-ended', gameState, overallWinner, newRoundWinners);
+              console.log(`🏆 Final game ended (bot), overall winner: ${overallWinner.name} with ${overallWinner.score} points`);
+              
+              // Update room status
+              const room = rooms.get(roomId);
+              if (room) {
+                room.gameInProgress = false;
+                rooms.set(roomId, room);
+                broadcastRoomsList();
+              }
+            } else {
+              // Round ended but game continues
+              // Update room status for round end
+              const room = rooms.get(roomId);
+              console.log(`🔍 BOT ROUND END - Room found: ${!!room}, Room ID: ${roomId}`);
+              if (room) {
+                console.log(`🔄 Updating room state - gameInProgress: ${room.gameInProgress} -> false`);
+                room.gameInProgress = false; // Mark game as paused between rounds
+                room.currentRound = currentRound;
+                room.roundWinners = gameState.roundWinners;
+                rooms.set(roomId, room);
+                console.log(`✅ Room state updated, rooms count: ${rooms.size}`);
+                broadcastRoomsList();
+              } else {
+                console.log(`❌ CRITICAL: Room ${roomId} not found when bot won round!`);
+              }
+              
+              io.to(roomId).emit('round-ended', gameState, currentPlayer, currentRound);
+              console.log(`🎯 Round ${currentRound} ended (bot), winner: ${currentPlayer.name}`);
+            }
             return;
           }
           
           // Schedule next bot turn if needed
           setTimeout(() => processBotTurn(roomId), 1000);
+        } else {
+          console.log(`❌ Bot move FAILED for ${currentPlayer.name}:`, botMove);
         }
+      } else {
+        console.log(`❌ No bot move returned for ${currentPlayer.name}`);
       }
     } catch (error) {
       console.error('Error processing bot turn:', error);
+      console.error('Stack trace:', error.stack);
     }
   }
 
   function getBotMove(gameState, botPlayer) {
+    console.log(`🤖 getBotMove called for ${botPlayer.name}`, {
+      handCount: botPlayer.handCount,
+      actualHandLength: botPlayer.hand ? botPlayer.hand.length : 'no hand array',
+      topCard: gameState.topCard ? `${gameState.topCard.rank} of ${gameState.topCard.suit}` : null,
+      drawCount: gameState.drawCount,
+      isFirstPlay: gameState.isFirstPlay
+    });
+    
+    // Debug: Log bot's actual hand
+    console.log(`🃏 Bot ${botPlayer.name}'s hand:`, botPlayer.hand ? botPlayer.hand.map(c => `${c.rank} of ${c.suit}`).join(', ') : 'NO HAND ARRAY');
+    
     // Simple bot AI logic for Pis Yedili
     
     // If bot has exactly 1 card and hasn't said Tek yet, say Tek first
     if (botPlayer.handCount === 1 && !botPlayer.saidTek) {
+      console.log(`🤖 Bot ${botPlayer.name} saying Tek (1 card left)`);
       return {
         type: 'SAY_MAU',
         playerId: botPlayer.id
       };
     }
     
+    console.log(`🔍 Calling getValidCardsForBot...`);
     const validCards = getValidCardsForBot(botPlayer.hand, gameState);
+    console.log(`🤖 Valid cards for ${botPlayer.name}:`, validCards.length, 'cards:', validCards.map(c => `${c.rank} of ${c.suit}`));
     
     if (validCards.length > 0) {
       // For now, just play the first valid card
       const cardToPlay = validCards[0];
+      console.log(`🤖 Bot ${botPlayer.name} playing card: ${cardToPlay.rank} of ${cardToPlay.suit}`);
       
-      return {
+      const move = {
         type: 'PLAY_CARD',
         playerId: botPlayer.id,
         card: cardToPlay
       };
+      console.log(`🤖 Returning PLAY_CARD move:`, move);
+      return move;
     } else {
       // No valid cards, draw a card
-      return {
+      console.log(`🤖 Bot ${botPlayer.name} has no valid cards, drawing card`);
+      const move = {
         type: 'DRAW_CARD',
         playerId: botPlayer.id
       };
+      console.log(`🤖 Returning DRAW_CARD move:`, move);
+      return move;
     }
   }
 
-  function getCardColor(suit) {
-    return suit === 'hearts' || suit === 'diamonds' ? 'red' : 'black';
-  }
 
   function getValidCardsForBot(hand, gameState) {
     const { topCard, wildSuit, drawCount, isFirstPlay } = gameState;
@@ -938,11 +1137,10 @@ app.prepare().then(() => {
     // Jacks are always playable (wild cards)
     const jacks = hand.filter(card => card.rank === 'J');
     
-    // Normal matching: same suit, same rank, or same color
+    // Normal matching: same suit or same rank (no color matching)
     const normalMatches = hand.filter(card => 
       card.suit === topCard.suit || 
-      card.rank === topCard.rank ||
-      getCardColor(card.suit) === getCardColor(topCard.suit)
+      card.rank === topCard.rank
     );
     
     // Combine jacks with normal matches (avoid duplicates)
@@ -1130,10 +1328,14 @@ app.prepare().then(() => {
     const playerId = socket.data.playerId;
     const roomId = socket.data.roomId;
     
+    console.log(`🔌 DISCONNECT: Socket ${socket.id} disconnected, playerId: ${playerId}, roomId: ${roomId}`);
+    
     if (playerId && roomId) {
       const room = rooms.get(roomId);
+      console.log(`🔍 DISCONNECT: Room found: ${!!room}, players count: ${room?.players?.length || 0}`);
       if (room) {
         const player = room.players.find(p => p.id === playerId);
+        console.log(`🔍 DISCONNECT: Player found: ${!!player}, player name: ${player?.name || 'unknown'}`);
         if (player) {
           player.isConnected = false;
           rooms.set(roomId, room);
@@ -1144,15 +1346,19 @@ app.prepare().then(() => {
           console.log(`Player ${playerId} disconnected from room ${roomId} but keeping in room`);
           
           // Set a timeout to remove the player if they don't reconnect within 5 minutes
+          console.log(`⏰ Setting 5-minute timeout for player ${playerId} in room ${roomId}`);
           setTimeout(() => {
+            console.log(`⏰ TIMEOUT TRIGGERED: Checking player ${playerId} in room ${roomId}`);
             const currentRoom = rooms.get(roomId);
             if (currentRoom) {
               const currentPlayer = currentRoom.players.find(p => p.id === playerId);
               if (currentPlayer && !currentPlayer.isConnected) {
+                console.log(`⏰ REMOVING: Player ${playerId} hasn't reconnected, removing from room`);
                 // Player hasn't reconnected, remove them
                 currentRoom.players = currentRoom.players.filter(p => p.id !== playerId);
                 
                 if (currentRoom.players.length === 0) {
+                  console.log(`🗑️ ROOM DELETION: Room ${roomId} deleted (empty after timeout) - player ${playerId} timeout`);
                   rooms.delete(roomId);
                   gameStates.delete(roomId);
                   console.log(`Room ${roomId} deleted (empty after timeout)`);
@@ -1163,7 +1369,11 @@ app.prepare().then(() => {
                 
                 console.log(`Player ${playerId} removed from room ${roomId} after timeout`);
                 broadcastRoomsList();
+              } else {
+                console.log(`⏰ SKIP: Player ${playerId} has reconnected or room state changed`);
               }
+            } else {
+              console.log(`⏰ SKIP: Room ${roomId} no longer exists`);
             }
           }, 300000); // 5 minutes
         }
@@ -1174,6 +1384,99 @@ app.prepare().then(() => {
     }
     
     console.log(`Client disconnected: ${socket.id}`);
+  }
+
+  function handleContinueToNextRound(socket, roomId) {
+    try {
+      console.log(`🔄 Continue to next round request for room ${roomId} from ${socket.id}`);
+      console.log(`🔍 Room check - Total rooms: ${rooms.size}, Room IDs: ${Array.from(rooms.keys()).join(', ')}`);
+      console.log(`🔍 Socket data:`, {
+        playerId: socket.data.playerId,
+        playerName: socket.data.playerName,
+        roomId: socket.data.roomId,
+        isAuthenticated: socket.data.isAuthenticated
+      });
+      
+      const gameState = gameStates.get(roomId);
+      const room = rooms.get(roomId);
+      
+      if (!gameState || !room) {
+        console.log(`❌ Room or game not found - gameState: ${!!gameState}, room: ${!!room}`);
+        socket.emit('error', { code: 'ROOM_NOT_FOUND', message: 'Room or game not found' });
+        return;
+      }
+      
+      console.log(`📊 Game state - status: ${gameState.status}, isGameComplete: ${gameState.isGameComplete}`);
+      console.log(`📊 Room state - gameInProgress: ${room.gameInProgress}, currentRound: ${room.currentRound}`);
+      console.log(`📊 Validation - status === 'finished': ${gameState.status === 'finished'}, !isGameComplete: ${!gameState.isGameComplete}`);
+      
+      if (gameState.status !== 'finished') {
+        console.log(`❌ Invalid state: Game status is '${gameState.status}', expected 'finished'`);
+        socket.emit('error', { code: 'INVALID_STATE', message: `Game status is '${gameState.status}', expected 'finished'` });
+        return;
+      }
+      
+      if (gameState.isGameComplete) {
+        console.log(`❌ Invalid state: Game is complete, cannot continue to next round`);
+        socket.emit('error', { code: 'INVALID_STATE', message: 'Game is complete, no more rounds available' });
+        return;
+      }
+      
+      // Verify player is in the room
+      const playerId = socket.data.playerId;
+      console.log(`🔍 Player verification:`, {
+        playerId,
+        roomPlayersIds: room.players.map(p => p.id),
+        isPlayerInRoom: room.players.some(p => p.id === playerId)
+      });
+      
+      if (!playerId || !room.players.some(p => p.id === playerId)) {
+        console.log(`❌ Player ${playerId} not authorized to continue game`);
+        socket.emit('error', { code: 'UNAUTHORIZED', message: 'Not authorized to continue game' });
+        return;
+      }
+      
+      // Update room state for next round
+      const nextRound = (room.currentRound || 1) + 1;
+      room.currentRound = nextRound;
+      room.roundWinners = gameState.roundWinners || [];
+      
+      // Reset players' ready status for next round
+      room.players = room.players.map(roomPlayer => {
+        const gamePlayer = gameState.players.find(p => p.id === roomPlayer.id);
+        return gamePlayer ? {
+          ...roomPlayer,
+          score: gamePlayer.score || 0,
+          isReady: true // Auto-ready all players for next round
+        } : roomPlayer;
+      });
+      
+      // Ensure gameInProgress is false so handleStartGame can proceed
+      room.gameInProgress = false;
+      
+      // Store updated room state
+      rooms.set(roomId, room);
+      
+      console.log(`🆕 Starting round ${nextRound} for room ${roomId}, room state updated`);
+      console.log(`🔍 Room players ready status:`, room.players.map(p => ({ name: p.name, ready: p.isReady })));
+      
+      console.log(`🎮 Calling handleStartGame for next round...`);
+      // Start new round with same players
+      handleStartGame(socket, roomId);
+      
+      console.log(`📡 Broadcasting next-round-started event to room ${roomId}`);
+      // Broadcast that a new round has started
+      io.to(roomId).emit('next-round-started', {
+        roundNumber: nextRound,
+        totalRounds: room.maxRounds || 1
+      });
+      
+      console.log(`✅ Continue to next round completed successfully for room ${roomId}`);
+      
+    } catch (error) {
+      console.error('Error continuing to next round:', error);
+      socket.emit('error', { code: 'INTERNAL_ERROR', message: 'Failed to continue to next round' });
+    }
   }
 
   function broadcastRoomsList() {

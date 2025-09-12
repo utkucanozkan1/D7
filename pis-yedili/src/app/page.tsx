@@ -20,7 +20,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-green-800 relative overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-green-800 relative overflow-hidden flex flex-col">
       {/* Background pattern */}
       <div className="absolute inset-0 opacity-10">
         <div className="absolute top-20 left-20 w-32 h-48 bg-white rounded-lg rotate-12 shadow-lg"></div>
@@ -38,7 +38,7 @@ export default function Home() {
             </div>
             <h1 className="text-2xl font-bold text-white">Pis Yedili</h1>
           </div>
-          
+
           <div className="flex space-x-4">
             <button className="text-white hover:text-yellow-300 transition-colors">
               <Settings className="w-6 h-6" />
@@ -58,18 +58,12 @@ export default function Home() {
             <h2 className="text-6xl md:text-7xl font-bold text-white mb-6 leading-tight">
               Pis Yedili
             </h2>
-            <p className="text-xl md:text-2xl text-blue-100 mb-2">
-              The Classic Turkish Card Game
-            </p>
-            <p className="text-lg text-blue-200 opacity-80">
-              Play Mau Mau online with friends around the world
-            </p>
           </div>
 
           {/* Quick Play Section */}
-          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-8 mb-8 border border-white/20">
+          {/* <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-8 mb-8 border border-white/20">
             <h3 className="text-2xl font-semibold text-white mb-6">Quick Play</h3>
-            
+
             <div className="max-w-md mx-auto space-y-4">
               <input
                 type="text"
@@ -79,7 +73,7 @@ export default function Home() {
                 className="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
                 maxLength={20}
               />
-              
+
               <button
                 onClick={handleQuickPlay}
                 disabled={!playerName.trim()}
@@ -89,11 +83,11 @@ export default function Home() {
                 <span>Find Game</span>
               </button>
             </div>
-          </div>
+          </div> */}
 
           {/* Action Buttons */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl mx-auto">
-            <Link 
+            <Link
               href="/lobby"
               className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20 hover:bg-white/20 transition-all duration-200 group"
             >
@@ -118,7 +112,7 @@ export default function Home() {
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 p-6 mt-12">
+      <footer className="relative z-10 p-6">
         <div className="max-w-7xl mx-auto text-center">
           <div className="flex flex-wrap justify-center items-center space-x-6 text-blue-200 text-sm">
             <span>© 2025 Pis Yedili</span>

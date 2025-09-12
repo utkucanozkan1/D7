@@ -14,7 +14,7 @@ import { v4 as uuidv4 } from 'uuid';
 /**
  * Initialize a new game state
  */
-export function initializeGame(roomId: string, players: Player[]): GameState {
+export function initializeGame(roomId: string, players: Player[], maxRounds: number = 1, currentRound: number = 1, roundWinners: string[] = []): GameState {
   // Create and shuffle a new deck
   const deck = shuffleDeck(createDeck());
   
@@ -62,7 +62,11 @@ export function initializeGame(roomId: string, players: Player[]): GameState {
     finishedAt: null,
     winner: null,
     turnStartTime: new Date(),
-    turnTimeLimit: defaultGameRules.turnTimeLimit
+    turnTimeLimit: defaultGameRules.turnTimeLimit,
+    maxRounds,
+    currentRound,
+    roundWinners,
+    isGameComplete: false
   };
   
   return gameState;
@@ -75,12 +79,6 @@ function isSpecialCardForStart(card: Card): boolean {
   return ['7', '8', 'J'].includes(card.rank);
 }
 
-/**
- * Get the color of a card suit
- */
-function getCardColor(suit: Suit): 'red' | 'black' {
-  return suit === 'hearts' || suit === 'diamonds' ? 'red' : 'black';
-}
 
 /**
  * Validate if a card can be played on top of the current card
@@ -117,10 +115,9 @@ export function canPlayCard(cardToPlay: Card, topCard: Card | null, wildSuit: Su
     return true;
   }
   
-  // Check all three matching conditions:
-  // 1. Same suit (e.g., hearts on hearts)
+  // Check matching conditions for Pis Yedili:
+  // 1. Same suit (e.g., hearts on hearts, clubs on clubs)
   // 2. Same rank/number (e.g., 3 on 3, K on K, 10 on 10)
-  // 3. Same color (red on red, black on black)
   
   // Debug: Log the raw values being compared
   console.log('  Raw comparison values:', {
@@ -134,19 +131,15 @@ export function canPlayCard(cardToPlay: Card, topCard: Card | null, wildSuit: Su
   
   const suitMatch = cardToPlay.suit === topCard.suit;
   const rankMatch = cardToPlay.rank === topCard.rank;
-  const cardColor = getCardColor(cardToPlay.suit);
-  const topCardColor = getCardColor(topCard.suit);
-  const colorMatch = cardColor === topCardColor;
   
   console.log('  Matching checks:', {
     suitMatch: `${cardToPlay.suit} === ${topCard.suit} = ${suitMatch}`,
-    rankMatch: `"${cardToPlay.rank}" === "${topCard.rank}" = ${rankMatch}`,
-    colorMatch: `${cardColor} === ${topCardColor} = ${colorMatch}`
+    rankMatch: `"${cardToPlay.rank}" === "${topCard.rank}" = ${rankMatch}`
   });
   
-  // Card can be played if ANY of these conditions are true
-  const canPlay = suitMatch || rankMatch || colorMatch;
-  console.log('  Final result:', canPlay, '(suit:', suitMatch, 'rank:', rankMatch, 'color:', colorMatch, ')');
+  // Card can be played if EITHER suit OR rank matches (no color matching)
+  const canPlay = suitMatch || rankMatch;
+  console.log('  Final result:', canPlay, '(suit:', suitMatch, 'rank:', rankMatch, ')');
   
   return canPlay;
 }
@@ -196,6 +189,7 @@ export function validateMove(gameState: GameState, move: GameMove): { valid: boo
         }
       }
       
+      // Strategic drawing is allowed: player can choose to draw even if they have valid cards
       return { valid: true };
     
     case 'CHOOSE_SUIT':
@@ -496,4 +490,96 @@ export function shouldEndGame(gameState: GameState): { shouldEnd: boolean; reaso
   }
   
   return { shouldEnd: false };
+}
+
+/**
+ * Handle round completion when a player wins
+ */
+export function completeRound(gameState: GameState, winnerId: string): GameState {
+  const newRoundWinners = [...(gameState.roundWinners || []), winnerId];
+  const currentRound = gameState.currentRound || 1;
+  const maxRounds = gameState.maxRounds || 1;
+  
+  // Calculate scores for all players based on remaining cards
+  const playersWithScores = gameState.players.map(player => {
+    const roundScore = player.id === winnerId ? 0 : calculatePenaltyPoints(player.hand);
+    const totalScore = (player.score || 0) + roundScore;
+    
+    return {
+      ...player,
+      roundScore,
+      score: totalScore
+    };
+  });
+  
+  const updatedGameState = {
+    ...gameState,
+    players: playersWithScores,
+    roundWinners: newRoundWinners
+  };
+  
+  // Check if this was the final round
+  if (currentRound >= maxRounds) {
+    // Game is complete - find overall winner (lowest total score wins in Mau Mau)
+    const overallWinner = playersWithScores.reduce((best, player) => {
+      const bestScore = best.score || 0;
+      const playerScore = player.score || 0;
+      return playerScore < bestScore ? player : best;
+    });
+    
+    return {
+      ...updatedGameState,
+      status: 'finished',
+      winner: overallWinner.id,
+      finishedAt: new Date(),
+      isGameComplete: true
+    };
+  }
+  
+  // Round complete but game continues
+  return {
+    ...updatedGameState,
+    status: 'finished', // Temporarily finished for this round
+    winner: winnerId,
+    finishedAt: new Date()
+  };
+}
+
+/**
+ * Start the next round of the game
+ */
+export function startNextRound(gameState: GameState): GameState {
+  const nextRound = (gameState.currentRound || 1) + 1;
+  
+  // Reset game state for new round but keep round tracking
+  return initializeGame(
+    gameState.roomId,
+    gameState.players,
+    gameState.maxRounds,
+    nextRound,
+    gameState.roundWinners
+  );
+}
+
+/**
+ * Check if a round should end and determine the type of completion
+ */
+export function checkRoundCompletion(gameState: GameState): { 
+  roundComplete: boolean; 
+  gameComplete: boolean; 
+  winnerId?: string 
+} {
+  if (!gameState.winner) {
+    return { roundComplete: false, gameComplete: false };
+  }
+  
+  const currentRound = gameState.currentRound || 1;
+  const maxRounds = gameState.maxRounds || 1;
+  const gameComplete = currentRound >= maxRounds;
+  
+  return {
+    roundComplete: true,
+    gameComplete,
+    winnerId: gameState.winner
+  };
 }

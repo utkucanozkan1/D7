@@ -20,7 +20,8 @@ export interface Player {
   hasDrawnThisTurn?: boolean;
   saidMau?: boolean; // Keep for Mau Mau compatibility
   saidTek?: boolean; // Pis Yedili: declare "tek" when down to 1 card
-  score?: number; // Running score for the game
+  score?: number; // Running total score across all rounds
+  roundScore?: number; // Points from current round
 }
 
 export interface Room {
@@ -32,6 +33,9 @@ export interface Room {
   gameInProgress: boolean;
   createdAt: Date;
   createdBy: string;
+  maxRounds?: number; // Number of rounds to play (1-10)
+  currentRound?: number; // Current round number
+  roundWinners?: string[]; // Array of player IDs who won each round
 }
 
 export type GameDirection = 'clockwise' | 'counterclockwise';
@@ -59,6 +63,11 @@ export interface GameState {
   isFirstPlay?: boolean; // First play must be a club
   sevenStack?: number; // Count of consecutive 7s played
   rules?: GameRules; // Game rules including scoring
+  // Multi-round game properties
+  currentRound?: number; // Current round number
+  maxRounds?: number; // Total number of rounds to play
+  roundWinners?: string[]; // Array of player IDs who won each round
+  isGameComplete?: boolean; // True when all rounds are finished
 }
 
 // Pis Yedili special card effects
@@ -135,6 +144,8 @@ export type GameEvent =
   | { type: 'CARD_DRAWN'; playerId: string; count: number; gameState: GameState }
   | { type: 'TURN_CHANGED'; currentPlayerIndex: number; gameState: GameState }
   | { type: 'GAME_ENDED'; winner: Player; gameState: GameState }
+  | { type: 'ROUND_ENDED'; winner: Player; gameState: GameState; roundNumber: number }
+  | { type: 'FINAL_GAME_ENDED'; winner: Player; gameState: GameState; roundWinners: string[] }
   | { type: 'PLAYER_SAID_MAU'; playerId: string }
   | { type: 'SUIT_CHOSEN'; suit: Suit; gameState: GameState }
   | { type: 'INVALID_MOVE'; playerId: string; reason: string };
