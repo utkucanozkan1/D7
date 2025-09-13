@@ -360,18 +360,29 @@ export default function GamePage({ params }: GamePageProps) {
   const handleContinueToNextRound = () => {
     console.log('🔄 Continue to next round requested');
     const socketManager = getSocketManager();
-    
+    const socket = socketManager.getSocket();
+
     // Set loading state to show progress
     setIsLoading(true);
     loadingRef.current = true;
-    
-    // Emit the continue request
-    console.log('📡 Emitting continue-to-next-round event to server with roomId:', roomId);
+
+    console.log('📡 Socket connected:', socket?.connected);
+    console.log('📡 Socket ID:', socket?.id);
+    console.log('📡 About to emit continue-to-next-round');
+
+    // Emit via socket manager
+    console.log('📡 Emitting continue-to-next-round event via socket manager with roomId:', roomId);
     socketManager.emit('continue-to-next-round', roomId);
-    
+
+    // Also emit directly via socket for redundancy (this was working in test)
+    if (socket?.connected) {
+      console.log('📡 Emitting continue-to-next-round event via direct socket with roomId:', roomId);
+      socket.emit('continue-to-next-round', roomId);
+    }
+
     // Close modal immediately for better UX
     setShowWinnerModal(false);
-    
+
     // Add timeout fallback in case server doesn't respond
     setTimeout(() => {
       // If still loading after 10 seconds, there's likely an error
@@ -382,7 +393,7 @@ export default function GamePage({ params }: GamePageProps) {
         setError('Failed to start next round. Please try refreshing the page.');
       }
     }, 10000);
-    
+
     console.log('🔄 Continue request sent, waiting for server response...');
   };
 
@@ -394,6 +405,8 @@ export default function GamePage({ params }: GamePageProps) {
   const handleLeaveLobby = () => {
     router.push('/lobby');
   };
+
+
 
   const handleFillWithBots = () => {
     console.log('🤖 Fill with bots clicked');

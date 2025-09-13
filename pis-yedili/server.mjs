@@ -1,20 +1,21 @@
-const { createServer } = require('http');
-const { parse } = require('url');
-const next = require('next');
-const { Server } = require('socket.io');
-const { v4: uuidv4 } = require('uuid');
+import { createServer } from 'http';
+import { parse } from 'url';
+import next from 'next';
+import { Server } from 'socket.io';
+import { v4 as uuidv4 } from 'uuid';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'localhost';
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 6050;
 
-const app = next({ dev, hostname, port });
+const app = next({ dev, hostname });
 const handle = app.getRequestHandler();
 
 // In-memory storage for development
 const rooms = new Map();
 const gameStates = new Map();
 const playerSockets = new Map();
+const roomTransitions = new Set(); // Track rooms in transition
 
 // Card game constants and utilities
 const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
@@ -87,7 +88,7 @@ app.prepare().then(() => {
   // Socket.IO setup
   const io = new Server(httpServer, {
     cors: {
-      origin: dev ? 'http://localhost:3000' : false,
+      origin: dev ? `http://localhost:${port}` : false,
       methods: ['GET', 'POST'],
     },
     transports: ['websocket', 'polling'],
@@ -135,7 +136,8 @@ app.prepare().then(() => {
       handleDeleteRoom(socket, roomId);
     });
     socket.on('get-room-state', (roomId) => {
-      console.log(`Received get-room-state event from ${socket.id}`);
+      console.log(`📞 GET-ROOM-STATE EVENT: Received get-room-state event from ${socket.id} for room ${roomId}`);
+      socket.emit('debug-response', { message: 'get-room-state received', roomId, timestamp: new Date() });
       handleGetRoomState(socket, roomId);
     });
     socket.on('rejoin-room', (roomId, playerId, playerName) => {
@@ -155,10 +157,103 @@ app.prepare().then(() => {
       console.log(`🧪 Test event received from ${socket.id}:`, data);
     });
     
-    socket.on('start-game', (roomId) => handleStartGame(socket, roomId));
-    socket.on('fill-with-bots', (roomId) => handleFillWithBots(socket, roomId));
-    socket.on('make-move', (roomId, move) => handleMakeMove(socket, roomId, move));
-    socket.on('continue-to-next-round', (roomId) => handleContinueToNextRound(socket, roomId));
+    socket.on('start-game', async (roomId) => await handleStartGame(socket, roomId));
+    socket.on('fill-with-bots', async (roomId) => await handleFillWithBots(socket, roomId));
+    socket.on('make-move', async (roomId, move) => await handleMakeMove(socket, roomId, move));
+    socket.on('continue-to-next-round', async (roomId) => {
+      console.log(`📞 CONTINUE EVENT RECEIVED: continue-to-next-round from ${socket.id} for room ${roomId}`);
+      console.log(`🔍 CONTINUE EVENT DEBUG: Socket connected: ${socket.connected}, Socket authenticated: ${socket.data.isAuthenticated}`);
+      await handleContinueToNextRound(socket, roomId);
+    });
+
+    // Testing/Debug events
+    socket.on('simulate-round-win', async (roomId) => {
+      try {
+        console.log(`🎮 Simulating round win for room ${roomId}`);
+        console.log('Socket data:', socket.data);
+        console.log('Room exists:', rooms.has(roomId));
+        console.log('Game state exists:', gameStates.has(roomId));
+
+        const gameState = gameStates.get(roomId);
+        const room = rooms.get(roomId);
+        const playerId = socket.data.playerId;
+
+        if (!gameState || !room) {
+          console.log('Game state or room not found');
+          socket.emit('error', { code: 'ROOM_NOT_FOUND', message: 'Room or game not found' });
+          return;
+        }
+
+        if (!playerId) {
+          console.log('Player not found');
+          socket.emit('error', { code: 'PLAYER_NOT_FOUND', message: 'Player not found' });
+          return;
+        }
+
+        const currentPlayer = gameState.players.find(p => p.id === playerId);
+        if (!currentPlayer) {
+          console.log('Player not found in game');
+          socket.emit('error', { code: 'PLAYER_NOT_FOUND', message: 'Player not found in game' });
+          return;
+        }
+
+        // Simulate winning the round
+        const currentRound = gameState.currentRound || 1;
+        const maxRounds = gameState.maxRounds || 1;
+        const newRoundWinners = [...(gameState.roundWinners || []), playerId];
+
+        // Calculate scores
+        gameState.players = gameState.players.map(player => {
+          const roundScore = player.id === playerId ? 0 : calculatePenaltyPoints(player.hand);
+          const totalScore = (player.score || 0) + roundScore;
+          return {
+            ...player,
+            roundScore,
+            score: totalScore
+          };
+        });
+
+        gameState.status = 'finished';
+        gameState.winner = playerId;
+        gameState.finishedAt = new Date();
+        gameState.roundWinners = newRoundWinners;
+
+        if (currentRound >= maxRounds) {
+          // Game complete
+          const overallWinner = gameState.players.reduce((best, player) => {
+            const bestScore = best.score || 0;
+            const playerScore = player.score || 0;
+            return playerScore < bestScore ? player : best;
+          });
+
+          gameState.winner = overallWinner.id;
+          gameState.isGameComplete = true;
+
+          io.to(roomId).emit('final-game-ended', gameState, overallWinner, newRoundWinners);
+
+          // Update room status
+          room.gameInProgress = false;
+          rooms.set(roomId, room);
+          broadcastRoomsList();
+        } else {
+          // Round ended but game continues
+          room.gameInProgress = false;
+          room.currentRound = currentRound;
+          room.roundWinners = gameState.roundWinners;
+          rooms.set(roomId, room);
+          broadcastRoomsList();
+
+          io.to(roomId).emit('round-ended', gameState, currentPlayer, currentRound);
+        }
+
+        // Update game state
+        gameStates.set(roomId, gameState);
+        console.log(`✅ Round win simulation complete for ${currentPlayer.name}`);
+      } catch (error) {
+        console.error('Error in simulate-round-win:', error);
+        socket.emit('error', { code: 'SIMULATION_ERROR', message: 'Failed to simulate round win' });
+      }
+    });
 
     // Connection events
     socket.on('ping', () => socket.emit('pong'));
@@ -169,16 +264,15 @@ app.prepare().then(() => {
   function handleCreateRoom(socket, roomData) {
     try {
       console.log(`Create room request from ${socket.id}:`, roomData);
-      
+
       if (!roomData.name || roomData.name.trim().length === 0) {
         console.log('Invalid room name');
-        socket.emit('error', { 
-          code: 'INVALID_ROOM_NAME', 
-          message: 'Room name is required' 
+        socket.emit('error', {
+          code: 'INVALID_ROOM_NAME',
+          message: 'Room name is required'
         });
         return;
       }
-
       const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const room = {
         id: roomId,
@@ -197,49 +291,48 @@ app.prepare().then(() => {
       rooms.set(roomId, room);
       console.log(`Room created: ${roomId}, total rooms: ${rooms.size}`);
       socket.emit('room-created', room);
-      
+
       broadcastRoomsList();
       console.log(`Room created: ${roomId} by ${socket.id}`);
     } catch (error) {
       console.error('Error creating room:', error);
-      socket.emit('error', { 
-        code: 'INTERNAL_ERROR', 
-        message: 'Failed to create room' 
+      socket.emit('error', {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to create room'
       });
     }
   }
-
   function handleJoinRoom(socket, roomId, playerName) {
     try {
       if (!playerName || playerName.trim().length === 0) {
-        socket.emit('error', { 
-          code: 'INVALID_PLAYER_NAME', 
-          message: 'Player name is required' 
+        socket.emit('error', {
+          code: 'INVALID_PLAYER_NAME',
+          message: 'Player name is required'
         });
         return;
       }
 
       const room = rooms.get(roomId);
       if (!room) {
-        socket.emit('error', { 
-          code: 'ROOM_NOT_FOUND', 
-          message: 'Room not found' 
+        socket.emit('error', {
+          code: 'ROOM_NOT_FOUND',
+          message: 'Room not found'
         });
         return;
       }
 
       if (room.players.length >= room.maxPlayers) {
-        socket.emit('error', { 
-          code: 'ROOM_FULL', 
-          message: 'Room is full' 
+        socket.emit('error', {
+          code: 'ROOM_FULL',
+          message: 'Room is full'
         });
         return;
       }
 
       if (room.players.some(p => p.name === playerName.trim())) {
-        socket.emit('error', { 
-          code: 'INVALID_PLAYER_NAME', 
-          message: 'Player name is already taken' 
+        socket.emit('error', {
+          code: 'INVALID_PLAYER_NAME',
+          message: 'Player name is already taken'
         });
         return;
       }
@@ -269,17 +362,17 @@ app.prepare().then(() => {
       socket.emit('room-joined', room, playerId);
       socket.to(roomId).emit('player-joined', roomId, player);
       io.to(roomId).emit('room-updated', room);
-      
+
       broadcastRoomsList();
       console.log(`Player ${playerName} (${playerId}) joined room ${roomId}`);
     } catch (error) {
       console.error('Error joining room:', error);
-      socket.emit('error', { 
-        code: 'INTERNAL_ERROR', 
-        message: 'Failed to join room' 
+      socket.emit('error', {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to join room'
       });
     }
-  }
+}
 
   function handleRejoinRoom(socket, roomId, playerId, playerName) {
     try {
@@ -350,7 +443,12 @@ app.prepare().then(() => {
       room.players = room.players.filter(p => p.id !== playerId);
       
       if (room.players.length === 0) {
+        if (roomTransitions.has(roomId)) {
+          console.log(`🔒 PROTECTION: Prevented deletion of room ${roomId} - in transition`);
+          return;
+        }
         console.log(`🗑️ ROOM DELETION: Room ${roomId} deleted (empty) - triggered by handleLeaveRoom`);
+        console.log(`🔍 DELETION STACK TRACE:`, new Error().stack);
         rooms.delete(roomId);
         gameStates.delete(roomId);
         console.log(`Room ${roomId} deleted (empty)`);
@@ -392,15 +490,21 @@ app.prepare().then(() => {
 
   function handleGetRoomState(socket, roomId) {
     try {
+      console.log(`🔍 GET ROOM STATE: Request for room ${roomId} from socket ${socket.id}`);
+      console.log(`🔍 ROOMS DEBUG: Total rooms: ${rooms.size}, Available room IDs: ${Array.from(rooms.keys())}`);
+
       const room = rooms.get(roomId);
       if (!room) {
-        console.log(`Room ${roomId} not found when requested by ${socket.id}`);
-        socket.emit('error', { 
-          code: 'ROOM_NOT_FOUND', 
-          message: 'Room not found' 
+        console.log(`❌ GET ROOM STATE: Room ${roomId} not found when requested by ${socket.id}`);
+        console.log(`🔍 AVAILABLE ROOMS:`, Array.from(rooms.entries()).map(([id, r]) => ({ id, name: r.name, players: r.players.length })));
+        socket.emit('error', {
+          code: 'ROOM_NOT_FOUND',
+          message: 'Room not found'
         });
         return;
       }
+
+      console.log(`✅ GET ROOM STATE: Room ${roomId} found, processing...`);
 
       // Find the player in the room by socket ID
       let playerId = null;
@@ -482,6 +586,7 @@ app.prepare().then(() => {
       
       // Remove the room
       console.log(`🗑️ ROOM DELETION: Room ${roomId} deleted (handleDeleteRoom) by socket ${socket.id}`);
+      console.log(`🔍 DELETION STACK TRACE:`, new Error().stack);
       rooms.delete(roomId);
       gameStates.delete(roomId);
       
@@ -625,16 +730,29 @@ app.prepare().then(() => {
     }
   }
 
-  function handleStartGame(socket, roomId) {
-    console.log(`🎮 handleStartGame called for room ${roomId} by socket ${socket.id}`);
-    const room = rooms.get(roomId);
-    const playerId = socket.data.playerId;
-    console.log(`🔍 Start game data:`, {
-      roomExists: !!room,
-      playerId,
-      roomPlayersCount: room?.players?.length || 0,
-      gameInProgress: room?.gameInProgress
-    });
+  async function handleStartGame(socket, roomId) {
+    try {
+      console.log(`🎮 GAME START: handleStartGame called for room ${roomId} by socket ${socket.id}`);
+      console.log(`🔍 GAME START DEBUG: Rooms exist: ${rooms.size}, Room exists: ${rooms.has(roomId)}`);
+      console.log(`🔍 GAME START DEBUG: Game states exist: ${gameStates.size}, Game state exists: ${gameStates.has(roomId)}`);
+
+      const room = rooms.get(roomId);
+      const playerId = socket.data.playerId;
+
+      console.log(`🔍 GAME START DATA:`, {
+        roomExists: !!room,
+        playerId,
+        roomPlayersCount: room?.players?.length || 0,
+        gameInProgress: room?.gameInProgress,
+        socketData: socket.data,
+        roomDetails: room ? {
+          id: room.id,
+          name: room.name,
+          players: room.players.map(p => ({ id: p.id, name: p.name, isReady: p.isReady })),
+          currentRound: room.currentRound,
+          maxRounds: room.maxRounds
+        } : null
+      });
 
     if (!room) {
       socket.emit('error', { 
@@ -653,11 +771,17 @@ app.prepare().then(() => {
     }
 
     if (room.gameInProgress) {
-      socket.emit('error', { 
-        code: 'GAME_ALREADY_STARTED', 
-        message: 'Game is already in progress' 
+      socket.emit('error', {
+        code: 'GAME_ALREADY_STARTED',
+        message: 'Game is already in progress'
       });
       return;
+    }
+
+    // Ensure game state is clean (handleContinueToNextRound should have done this already)
+    if (gameStates.has(roomId)) {
+      console.log(`⚠️ Found existing game state, cleaning up`);
+      gameStates.delete(roomId);
     }
 
     if (room.players.length < 2) {
@@ -795,9 +919,16 @@ app.prepare().then(() => {
     broadcastRoomsList();
 
     console.log(`✅ Game started for room ${roomId} by ${playerId}`);
-    
+
     // Check if current player is a bot and process their turn
     setTimeout(() => processBotTurn(roomId), 1000);
+    } catch (error) {
+      console.error('Error starting game:', error);
+      socket.emit('error', {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to start game'
+      });
+    }
   }
 
   function handleMakeMove(socket, roomId, move) {
@@ -1358,7 +1489,12 @@ app.prepare().then(() => {
                 currentRoom.players = currentRoom.players.filter(p => p.id !== playerId);
                 
                 if (currentRoom.players.length === 0) {
+                  if (roomTransitions.has(roomId)) {
+                    console.log(`🔒 PROTECTION: Prevented deletion of room ${roomId} - in transition (timeout)`);
+                    return;
+                  }
                   console.log(`🗑️ ROOM DELETION: Room ${roomId} deleted (empty after timeout) - player ${playerId} timeout`);
+                  console.log(`🔍 DELETION STACK TRACE:`, new Error().stack);
                   rooms.delete(roomId);
                   gameStates.delete(roomId);
                   console.log(`Room ${roomId} deleted (empty after timeout)`);
@@ -1386,95 +1522,124 @@ app.prepare().then(() => {
     console.log(`Client disconnected: ${socket.id}`);
   }
 
-  function handleContinueToNextRound(socket, roomId) {
+  async function handleContinueToNextRound(socket, roomId) {
     try {
-      console.log(`🔄 Continue to next round request for room ${roomId} from ${socket.id}`);
-      console.log(`🔍 Room check - Total rooms: ${rooms.size}, Room IDs: ${Array.from(rooms.keys()).join(', ')}`);
-      console.log(`🔍 Socket data:`, {
-        playerId: socket.data.playerId,
-        playerName: socket.data.playerName,
-        roomId: socket.data.roomId,
-        isAuthenticated: socket.data.isAuthenticated
-      });
-      
+      console.log(`🔄 ROUND TRANSITION START: Continue to next round request for room ${roomId} from ${socket.id}`);
+
+      // Mark room as in transition to prevent deletion
+      roomTransitions.add(roomId);
+      console.log(`🔒 PROTECTION: Room ${roomId} marked as in transition`);
+
+      console.log(`🔍 ROOMS DEBUG: Total rooms: ${rooms.size}, Room exists: ${rooms.has(roomId)}`);
+      console.log(`🔍 GAME STATES DEBUG: Total game states: ${gameStates.size}, Game state exists: ${gameStates.has(roomId)}`);
+
       const gameState = gameStates.get(roomId);
       const room = rooms.get(roomId);
-      
+
       if (!gameState || !room) {
-        console.log(`❌ Room or game not found - gameState: ${!!gameState}, room: ${!!room}`);
+        console.log(`❌ CRITICAL ERROR: Room or game not found - gameState: ${!!gameState}, room: ${!!room}`);
+        console.log(`🔍 Available rooms:`, Array.from(rooms.keys()));
+        console.log(`🔍 Available game states:`, Array.from(gameStates.keys()));
         socket.emit('error', { code: 'ROOM_NOT_FOUND', message: 'Room or game not found' });
         return;
       }
-      
-      console.log(`📊 Game state - status: ${gameState.status}, isGameComplete: ${gameState.isGameComplete}`);
-      console.log(`📊 Room state - gameInProgress: ${room.gameInProgress}, currentRound: ${room.currentRound}`);
-      console.log(`📊 Validation - status === 'finished': ${gameState.status === 'finished'}, !isGameComplete: ${!gameState.isGameComplete}`);
-      
-      if (gameState.status !== 'finished') {
-        console.log(`❌ Invalid state: Game status is '${gameState.status}', expected 'finished'`);
-        socket.emit('error', { code: 'INVALID_STATE', message: `Game status is '${gameState.status}', expected 'finished'` });
+
+      console.log(`📊 GAME STATE CHECK: status="${gameState.status}", isGameComplete=${gameState.isGameComplete}`);
+      console.log(`📊 ROOM STATE CHECK: gameInProgress=${room.gameInProgress}, currentRound=${room.currentRound}, maxRounds=${room.maxRounds}`);
+
+      if (gameState.status !== 'finished' || gameState.isGameComplete) {
+        console.log(`❌ Invalid state for continuing - status: ${gameState.status}, complete: ${gameState.isGameComplete}`);
+        socket.emit('error', { code: 'INVALID_STATE', message: 'Cannot continue to next round' });
         return;
       }
-      
-      if (gameState.isGameComplete) {
-        console.log(`❌ Invalid state: Game is complete, cannot continue to next round`);
-        socket.emit('error', { code: 'INVALID_STATE', message: 'Game is complete, no more rounds available' });
-        return;
-      }
-      
-      // Verify player is in the room
+
       const playerId = socket.data.playerId;
-      console.log(`🔍 Player verification:`, {
-        playerId,
-        roomPlayersIds: room.players.map(p => p.id),
-        isPlayerInRoom: room.players.some(p => p.id === playerId)
-      });
-      
       if (!playerId || !room.players.some(p => p.id === playerId)) {
-        console.log(`❌ Player ${playerId} not authorized to continue game`);
-        socket.emit('error', { code: 'UNAUTHORIZED', message: 'Not authorized to continue game' });
+        console.log(`❌ Player not authorized - playerId: ${playerId}, players: ${room.players.map(p => p.id)}`);
+        socket.emit('error', { code: 'UNAUTHORIZED', message: 'Not authorized' });
         return;
       }
-      
-      // Update room state for next round
+
+      console.log(`🎯 TRANSITION STEP 1: Starting round transition for room ${roomId}`);
+
+      // 1. Save player scores from the finished game
+      const playerScores = {};
+      gameState.players.forEach(p => {
+        playerScores[p.id] = p.score || 0;
+      });
+      console.log(`💾 TRANSITION STEP 2: Saved player scores:`, playerScores);
+
+      // 2. Update room for next round
       const nextRound = (room.currentRound || 1) + 1;
       room.currentRound = nextRound;
       room.roundWinners = gameState.roundWinners || [];
-      
-      // Reset players' ready status for next round
-      room.players = room.players.map(roomPlayer => {
-        const gamePlayer = gameState.players.find(p => p.id === roomPlayer.id);
-        return gamePlayer ? {
-          ...roomPlayer,
-          score: gamePlayer.score || 0,
-          isReady: true // Auto-ready all players for next round
-        } : roomPlayer;
-      });
-      
-      // Ensure gameInProgress is false so handleStartGame can proceed
       room.gameInProgress = false;
-      
-      // Store updated room state
+      console.log(`🔄 TRANSITION STEP 3: Updated room - nextRound: ${nextRound}, gameInProgress: ${room.gameInProgress}`);
+
+      // 3. Reset players with preserved scores
+      room.players = room.players.map(player => ({
+        ...player,
+        score: playerScores[player.id] || 0,
+        hand: [],
+        handCount: 0,
+        saidTek: false,
+        hasDrawnThisTurn: false,
+        isReady: true
+      }));
+      console.log(`👥 TRANSITION STEP 4: Reset players with scores:`, room.players.map(p => ({name: p.name, score: p.score, ready: p.isReady})));
+
+      // 4. Clean up old game state
+      gameStates.delete(roomId);
       rooms.set(roomId, room);
-      
-      console.log(`🆕 Starting round ${nextRound} for room ${roomId}, room state updated`);
-      console.log(`🔍 Room players ready status:`, room.players.map(p => ({ name: p.name, ready: p.isReady })));
-      
-      console.log(`🎮 Calling handleStartGame for next round...`);
-      // Start new round with same players
-      handleStartGame(socket, roomId);
-      
-      console.log(`📡 Broadcasting next-round-started event to room ${roomId}`);
-      // Broadcast that a new round has started
+      console.log(`🗑️ TRANSITION STEP 5: Cleaned game state, rooms count: ${rooms.size}`);
+
+      console.log(`📡 TRANSITION STEP 6: Broadcasting next-round-started event`);
+
+      // 5. Broadcast the round transition
       io.to(roomId).emit('next-round-started', {
         roundNumber: nextRound,
         totalRounds: room.maxRounds || 1
       });
-      
-      console.log(`✅ Continue to next round completed successfully for room ${roomId}`);
-      
+
+      io.to(roomId).emit('room-updated', room);
+      console.log(`📡 TRANSITION STEP 7: Broadcasted events`);
+
+      // 6. Start the new game
+      console.log(`🎮 TRANSITION STEP 8: About to start new game for round ${nextRound}`);
+      console.log(`🔍 PRE-START CHECK: Room exists: ${rooms.has(roomId)}, Room gameInProgress: ${room.gameInProgress}`);
+
+      // Double check room still exists before starting
+      const roomCheck = rooms.get(roomId);
+      if (!roomCheck) {
+        console.log(`❌ CRITICAL: Room disappeared before starting new game!`);
+        socket.emit('error', { code: 'ROOM_DISAPPEARED', message: 'Room was deleted during transition' });
+        return;
+      }
+
+      try {
+        await handleStartGame(socket, roomId);
+        console.log(`✅ ROUND TRANSITION COMPLETE: Round transition completed successfully`);
+      } catch (startGameError) {
+        console.error(`💥 ERROR in handleStartGame:`, startGameError);
+        console.error(`💥 START GAME ERROR STACK:`, startGameError.stack);
+
+        // Check if room still exists after error
+        console.log(`🔍 POST-ERROR CHECK: Room exists: ${rooms.has(roomId)}`);
+
+        socket.emit('error', {
+          code: 'START_GAME_FAILED',
+          message: 'Failed to start new round game: ' + startGameError.message
+        });
+      } finally {
+        // Always remove transition protection
+        roomTransitions.delete(roomId);
+        console.log(`🔓 PROTECTION: Room ${roomId} transition protection removed`);
+      }
+
     } catch (error) {
-      console.error('Error continuing to next round:', error);
+      console.error('💥 ROUND TRANSITION ERROR:', error);
+      console.error('💥 ERROR STACK:', error.stack);
+      roomTransitions.delete(roomId); // Remove protection on error
       socket.emit('error', { code: 'INTERNAL_ERROR', message: 'Failed to continue to next round' });
     }
   }

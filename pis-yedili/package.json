@@ -1,12 +1,13 @@
 {
   "name": "pis-yedili",
+  "type": "module",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node server.js",
+    "dev": "node server.mjs",
     "dev:next": "next dev --turbopack",
     "build": "next build",
-    "start": "NODE_ENV=production node server.js",
+    "start": "NODE_ENV=production node server.mjs",
     "start:next": "next start",
     "lint": "eslint"
   },

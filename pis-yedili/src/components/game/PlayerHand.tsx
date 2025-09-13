@@ -53,7 +53,11 @@ export function PlayerHand({
   };
 
   const renderPlayerInfo = () => (
-    <div className={`flex items-center space-x-2 mb-2 ${
+    <div className={`flex items-center ${
+      position === 'left' || position === 'right' ? 'flex-col space-y-1' : 'space-x-2'
+    } ${
+      position === 'left' || position === 'right' ? '' : 'mb-2'
+    } ${
       isCurrentPlayer ? 'text-yellow-400' : 'text-white'
     }`}>
       <Users className={`w-4 h-4 ${isCurrentPlayer ? 'text-yellow-400' : 'text-blue-300'}`} />
@@ -72,21 +76,25 @@ export function PlayerHand({
 
   const renderCards = () => {
     if (!isMyHand) {
-      // Show face-down cards for other players
+      // Show face-down cards for other players with overlapping for many cards
+      const maxVisibleCards = 5;
+      const visibleCardCount = Math.min(player.handCount, maxVisibleCards);
+
       return (
-        <div className={`flex ${getCardSpacing()}`}>
-          {Array.from({ length: Math.min(player.handCount, 10) }).map((_, index) => (
+        <div className="flex -space-x-3">
+          {Array.from({ length: visibleCardCount }).map((_, index) => (
             <CardComponent
               key={`${player.id}-card-${index}`}
               card={{ id: `hidden-${index}`, suit: 'spades', rank: 'A' }}
               faceDown={true}
               size="small"
               className="transform hover:scale-105"
+              style={{ zIndex: index }}
             />
           ))}
-          {player.handCount > 10 && (
-            <div className="flex items-center justify-center w-12 h-16 bg-gray-600 rounded-lg text-white text-xs font-bold">
-              +{player.handCount - 10}
+          {player.handCount > maxVisibleCards && (
+            <div className="flex items-center justify-center w-8 h-12 bg-gray-800/80 rounded text-white text-xs font-bold ml-1 border border-gray-600">
+              +{player.handCount - maxVisibleCards}
             </div>
           )}
         </div>
@@ -151,15 +159,26 @@ export function PlayerHand({
     );
   }
 
-  if (position === 'left' || position === 'right') {
+  if (position === 'left') {
     return (
-      <div className={`flex flex-col items-center space-y-2 ${
-        position === 'left' ? '-rotate-90' : 'rotate-90'
-      }`}>
-        <div className={position === 'left' ? 'rotate-90' : '-rotate-90'}>
+      <div className="flex flex-col items-center space-y-1 -rotate-90">
+        {/* Cards first, then name (name appears toward center after rotation) */}
+        {renderCards()}
+        <div className="rotate-180">
           {renderPlayerInfo()}
         </div>
+      </div>
+    );
+  }
+
+  if (position === 'right') {
+    return (
+      <div className="flex flex-col items-center space-y-1 rotate-90">
+        {/* Cards first, then name (name appears toward center after rotation) */}
         {renderCards()}
+        <div className="rotate-180">
+          {renderPlayerInfo()}
+        </div>
       </div>
     );
   }

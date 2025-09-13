@@ -29,7 +29,7 @@ class SocketManager {
     const serverUrl = url || (
       process.env.NODE_ENV === 'production' 
         ? process.env.NEXT_PUBLIC_APP_URL 
-        : 'http://localhost:3000'
+        : 'http://localhost:6050'
     );
 
     console.log('🔌 Attempting to connect to Socket.IO server at:', serverUrl);

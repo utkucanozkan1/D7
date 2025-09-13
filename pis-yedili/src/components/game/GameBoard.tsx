@@ -154,9 +154,9 @@ export function GameBoard({
         </div>
 
         {/* Middle section with left player, game area, and right player */}
-        <div className="flex-1 flex items-center">
-          {/* Left player */}
-          <div className="flex-shrink-0 p-4">
+        <div className="flex-1 flex items-center justify-center">
+          {/* Left player - Fixed position and size */}
+          <div className="absolute left-4 top-1/2 transform -translate-y-1/2 w-24 h-40 flex items-center justify-center">
             {positions.left && (
               <PlayerHand
                 player={positions.left}
@@ -166,8 +166,8 @@ export function GameBoard({
             )}
           </div>
 
-          {/* Central game area */}
-          <div className="flex-1 flex flex-col items-center justify-center space-y-8">
+          {/* Central game area - Absolutely positioned to stay centered */}
+          <div className="flex flex-col items-center justify-center space-y-8">
             {/* Game status */}
             <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
               <div className="flex items-center justify-center space-x-6 text-white">
@@ -205,8 +205,8 @@ export function GameBoard({
               </div>
             </div>
 
-            {/* Card play area */}
-            <div className="flex items-center space-x-8">
+            {/* Card play area - Fixed layout to prevent shifting */}
+            <div className="flex items-center justify-center space-x-8 h-32">
               {/* Deck */}
               <div className="flex flex-col items-center space-y-2">
                 <CardBack 
@@ -250,41 +250,44 @@ export function GameBoard({
               </div>
             </div>
 
-            {/* Action buttons */}
-            {isMyTurn && (
-              <div className="flex space-x-3">
-                {myPlayer?.hand.length === 1 && (
-                  <button
-                    onClick={onSayMau}
-                    className="bg-gradient-to-r from-yellow-400 to-yellow-600 text-black font-semibold py-2 px-4 rounded-lg hover:from-yellow-300 hover:to-yellow-500 transition-all duration-200 shadow-lg"
-                  >
-                    Say Tek!
-                  </button>
-                )}
-                
-                {!canPlayAnyCard && (
-                  <button
-                    onClick={onDrawCard}
-                    className="bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:from-blue-400 hover:to-blue-500 transition-all duration-200 shadow-lg"
-                  >
-                    {gameState.drawCount > 0 ? `Draw +${gameState.drawCount}` : 'Draw Card'}
-                  </button>
-                )}
-                
-                {canPlayAnyCard && gameState.drawCount === 0 && (
-                  <button
-                    onClick={onDrawCard}
-                    className="bg-gradient-to-r from-purple-500 to-purple-600 text-white font-semibold py-2 px-4 rounded-lg hover:from-purple-400 hover:to-purple-500 transition-all duration-200 shadow-lg opacity-80"
-                  >
-                    Strategic Draw
-                  </button>
-                )}
-              </div>
-            )}
+            {/* Action buttons - Fixed height to prevent vertical shifting */}
+            <div className="flex space-x-3 h-12 items-center justify-center">
+              {isMyTurn && (
+                <>
+                  {myPlayer?.hand.length === 1 && (
+                    <button
+                      onClick={onSayMau}
+                      className="bg-gradient-to-r from-yellow-400 to-yellow-600 text-black font-semibold py-2 px-4 rounded-lg hover:from-yellow-300 hover:to-yellow-500 transition-all duration-200 shadow-lg"
+                    >
+                      Say Tek!
+                    </button>
+                  )}
+
+                  {!canPlayAnyCard && (
+                    <button
+                      onClick={onDrawCard}
+                      className="bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:from-blue-400 hover:to-blue-500 transition-all duration-200 shadow-lg"
+                    >
+                      {gameState.drawCount > 0 ? `Draw +${gameState.drawCount}` : 'Draw Card'}
+                    </button>
+                  )}
+
+                  {canPlayAnyCard && gameState.drawCount === 0 && (
+                    <button
+                      onClick={onDrawCard}
+                      className="bg-gradient-to-r from-purple-500 to-purple-600 text-white font-semibold py-2 px-4 rounded-lg hover:from-purple-400 hover:to-purple-500 transition-all duration-200 shadow-lg opacity-80"
+                    >
+                      Strategic Draw
+                    </button>
+                  )}
+                </>
+              )}
+
+            </div>
           </div>
 
-          {/* Right player */}
-          <div className="flex-shrink-0 p-4">
+          {/* Right player - Fixed position and size */}
+          <div className="absolute right-4 top-1/2 transform -translate-y-1/2 w-24 h-40 flex items-center justify-center">
             {positions.right && (
               <PlayerHand
                 player={positions.right}
