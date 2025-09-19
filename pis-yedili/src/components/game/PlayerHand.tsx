@@ -59,17 +59,29 @@ export function PlayerHand({
       position === 'left' || position === 'right' ? '' : 'mb-2'
     } ${
       isCurrentPlayer ? 'text-yellow-400' : 'text-white'
-    }`}>
-      <Users className={`w-4 h-4 ${isCurrentPlayer ? 'text-yellow-400' : 'text-blue-300'}`} />
-      <span className="font-medium">{player.name}</span>
+    } ${
+      isCurrentPlayer ? 'turn-indicator' : ''
+    } transition-all duration-300`}>
+      <div className="relative">
+        <Users className={`w-4 h-4 ${isCurrentPlayer ? 'text-yellow-400' : 'text-blue-300'}`} />
+        {isCurrentPlayer && (
+          <div className="absolute -inset-1 bg-yellow-400 rounded-full animate-ping opacity-75" />
+        )}
+      </div>
+      <span className={`font-medium ${isCurrentPlayer ? 'font-bold text-lg' : ''} transition-all duration-300`}>
+        {player.name}
+      </span>
       {showCardCount && !isMyHand && (
         <span className="text-sm opacity-75">({player.handCount} cards)</span>
       )}
       {!player.isConnected && (
-        <span className="text-red-400 text-xs">(Disconnected)</span>
+        <span className="text-red-400 text-xs animate-pulse">(Disconnected)</span>
       )}
       {isCurrentPlayer && (
-        <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse" />
+        <div className="flex items-center space-x-1">
+          <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse" />
+          <span className="text-xs font-bold">YOUR TURN</span>
+        </div>
       )}
     </div>
   );

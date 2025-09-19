@@ -25,6 +25,8 @@ export default function GamePage({ params }: GamePageProps) {
   const [needsToJoin, setNeedsToJoin] = useState(false);
   const [playerName, setPlayerName] = useState<string>('');
   const [showWinnerModal, setShowWinnerModal] = useState(false);
+  const [gameAnnouncement, setGameAnnouncement] = useState<string>('');
+  const [showAnnouncement, setShowAnnouncement] = useState(false);
   const loadingRef = useRef(true);
   const roomRef = useRef<Room | null>(null);
 
@@ -47,12 +49,12 @@ export default function GamePage({ params }: GamePageProps) {
     // Handle connection status
     socketManager.on('connection-status', (status) => {
       setIsConnected(status === 'connected');
-      
+
       // Try to rejoin if we reconnect and have stored session
       if (status === 'connected' && typeof window !== 'undefined') {
         const storedPlayerId = localStorage.getItem(`room_${roomId}_playerId`);
         const storedPlayerName = localStorage.getItem(`room_${roomId}_playerName`);
-        
+
         if (storedPlayerId && storedPlayerName) {
           console.log('🔄 Reconnected, attempting to rejoin with stored session...');
           const socket = socketManager.getSocket();
@@ -62,6 +64,19 @@ export default function GamePage({ params }: GamePageProps) {
         }
       }
     });
+
+    // Also check initial connection state and set up periodic checks
+    const checkConnectionStatus = () => {
+      const socket = socketManager.getSocket();
+      const isSocketConnected = socket?.connected || false;
+      setIsConnected(isSocketConnected);
+    };
+
+    // Check immediately
+    checkConnectionStatus();
+
+    // Set up periodic connection check
+    const connectionCheckInterval = setInterval(checkConnectionStatus, 2000);
 
     // Handle game events
     socketManager.on('game-started', (newGameState: GameState) => {
@@ -92,6 +107,14 @@ export default function GamePage({ params }: GamePageProps) {
         console.error('Move failed:', reason);
         setError(reason || 'Move failed');
       }
+    });
+
+    socketManager.on('game-announcement', (announcement: string) => {
+      console.log('📢 Game announcement:', announcement);
+      setGameAnnouncement(announcement);
+      setShowAnnouncement(true);
+      // Hide announcement after 5 seconds to match slower pace
+      setTimeout(() => setShowAnnouncement(false), 5000);
     });
 
     socketManager.on('round-ended', (finalGameState: GameState, winner: Player, roundNumber: number) => {
@@ -216,11 +239,15 @@ export default function GamePage({ params }: GamePageProps) {
     return () => {
       // Clean up timeout
       clearTimeout(fallbackTimeout);
-      
+
+      // Clean up connection check interval
+      clearInterval(connectionCheckInterval);
+
       // Clean up listeners
       socketManager.off('game-started');
       socketManager.off('game-state-updated');
       socketManager.off('move-made');
+      socketManager.off('game-announcement');
       socketManager.off('round-ended');
       socketManager.off('final-game-ended');
       socketManager.off('next-round-started');
@@ -571,6 +598,19 @@ export default function GamePage({ params }: GamePageProps) {
             </div>
           </div>
         </div>
+
+        {/* Game Announcement Overlay */}
+        {showAnnouncement && (
+          <div className="absolute top-24 left-1/2 transform -translate-x-1/2 z-30">
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-8 py-4 rounded-2xl shadow-2xl border border-white/20 backdrop-blur-sm animate-bounce">
+              <div className="flex items-center space-x-3">
+                <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
+                <span className="font-bold text-lg">{gameAnnouncement}</span>
+                <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <GameBoard
           gameState={gameState}

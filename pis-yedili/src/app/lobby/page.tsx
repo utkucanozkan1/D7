@@ -19,6 +19,7 @@ import { Room } from '@/types/game';
 import { RoomCard } from '@/components/lobby/RoomCard';
 import { CreateRoomModal } from '@/components/lobby/CreateRoomModal';
 import { getSocketManager } from '@/lib/socket-client';
+import { CSSParticleBackground } from '@/components/effects/ParticleBackground';
 
 export default function LobbyPage() {
   const router = useRouter();
@@ -253,9 +254,10 @@ export default function LobbyPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-green-800">
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-green-800 relative">
+      <CSSParticleBackground />
       {/* Header */}
-      <header className="p-6 border-b border-white/20">
+      <header className="relative z-10 p-6 border-b border-white/20 backdrop-blur-sm bg-white/5">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <Link 
@@ -290,7 +292,7 @@ export default function LobbyPage() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto p-6">
+      <main className="relative z-10 max-w-7xl mx-auto p-6">
         {/* Search and Filters */}
         <div className="mb-8 space-y-4">
           {/* Search Bar */}

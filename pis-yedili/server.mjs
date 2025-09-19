@@ -920,8 +920,8 @@ app.prepare().then(() => {
 
     console.log(`✅ Game started for room ${roomId} by ${playerId}`);
 
-    // Check if current player is a bot and process their turn
-    setTimeout(() => processBotTurn(roomId), 1000);
+    // Check if current player is a bot and process their turn - much slower
+    setTimeout(() => processBotTurn(roomId), 4000);
     } catch (error) {
       console.error('Error starting game:', error);
       socket.emit('error', {
@@ -967,12 +967,27 @@ app.prepare().then(() => {
       if (success) {
         // Update game state
         gameStates.set(roomId, gameState);
-        
+
         console.log(`✅ Move successful, broadcasting to room ${roomId}`);
-        
-        // Broadcast the successful move
-        io.to(roomId).emit('move-made', gameState, move, true);
-        io.to(roomId).emit('game-state-updated', gameState);
+
+        // Create announcement for the card played
+        if (move.type === 'PLAY_CARD') {
+          const announcement = `${currentPlayer.name} played ${move.card.rank} of ${move.card.suit}`;
+          io.to(roomId).emit('game-announcement', announcement);
+        } else if (move.type === 'DRAW_CARD') {
+          const drawCount = gameState.drawCount > 0 ? gameState.drawCount : 1;
+          const announcement = `${currentPlayer.name} drew ${drawCount} card${drawCount > 1 ? 's' : ''}`;
+          io.to(roomId).emit('game-announcement', announcement);
+        } else if (move.type === 'SAY_MAU') {
+          const announcement = `${currentPlayer.name} said Tek!`;
+          io.to(roomId).emit('game-announcement', announcement);
+        }
+
+        // Broadcast the successful move with a longer delay for announcement
+        setTimeout(() => {
+          io.to(roomId).emit('move-made', gameState, move, true);
+          io.to(roomId).emit('game-state-updated', gameState);
+        }, 1500);
         
         // Check if round ended
         if (currentPlayer.handCount === 0) {
@@ -1043,8 +1058,8 @@ app.prepare().then(() => {
           return;
         }
         
-        // Schedule next bot turn if needed (after human move)
-        setTimeout(() => processBotTurn(roomId), 1000);
+        // Schedule next bot turn if needed (after human move) - much slower
+        setTimeout(() => processBotTurn(roomId), 4000);
       } else {
         console.log('❌ Move failed validation');
         socket.emit('move-made', gameState, move, false, 'Invalid move');
@@ -1104,10 +1119,25 @@ app.prepare().then(() => {
         if (success) {
           // Update game state
           gameStates.set(roomId, gameState);
-          
-          // Broadcast the move
-          io.to(roomId).emit('move-made', gameState, botMove, true);
-          io.to(roomId).emit('game-state-updated', gameState);
+
+          // Create announcement for the bot's move
+          if (botMove.type === 'PLAY_CARD') {
+            const announcement = `${currentPlayer.name} played ${botMove.card.rank} of ${botMove.card.suit}`;
+            io.to(roomId).emit('game-announcement', announcement);
+          } else if (botMove.type === 'DRAW_CARD') {
+            const drawCount = gameState.drawCount > 0 ? gameState.drawCount : 1;
+            const announcement = `${currentPlayer.name} drew ${drawCount} card${drawCount > 1 ? 's' : ''}`;
+            io.to(roomId).emit('game-announcement', announcement);
+          } else if (botMove.type === 'SAY_MAU') {
+            const announcement = `${currentPlayer.name} said Tek!`;
+            io.to(roomId).emit('game-announcement', announcement);
+          }
+
+          // Broadcast the move with a longer delay for announcement
+          setTimeout(() => {
+            io.to(roomId).emit('move-made', gameState, botMove, true);
+            io.to(roomId).emit('game-state-updated', gameState);
+          }, 2000);
           
           // Check if game ended
           if (currentPlayer.handCount === 0) {
@@ -1176,8 +1206,8 @@ app.prepare().then(() => {
             return;
           }
           
-          // Schedule next bot turn if needed
-          setTimeout(() => processBotTurn(roomId), 1000);
+          // Schedule next bot turn if needed - much slower
+          setTimeout(() => processBotTurn(roomId), 4000);
         } else {
           console.log(`❌ Bot move FAILED for ${currentPlayer.name}:`, botMove);
         }
@@ -1204,13 +1234,17 @@ app.prepare().then(() => {
     
     // Simple bot AI logic for Pis Yedili
     
-    // If bot has exactly 1 card and hasn't said Tek yet, say Tek first
-    if (botPlayer.handCount === 1 && !botPlayer.saidTek) {
-      console.log(`🤖 Bot ${botPlayer.name} saying Tek (1 card left)`);
-      return {
-        type: 'SAY_MAU',
-        playerId: botPlayer.id
-      };
+    // If bot has exactly 2 cards and hasn't said Tek yet, say Tek first before playing
+    if (botPlayer.handCount === 2 && !botPlayer.saidTek) {
+      // Check if bot can play a card - if so, say TEK first
+      const validCards = getValidCardsForBot(botPlayer.hand, gameState);
+      if (validCards.length > 0) {
+        console.log(`🤖 Bot ${botPlayer.name} saying Tek (2 cards, can play one)`);
+        return {
+          type: 'SAY_MAU',
+          playerId: botPlayer.id
+        };
+      }
     }
     
     console.log(`🔍 Calling getValidCardsForBot...`);
@@ -1319,44 +1353,73 @@ app.prepare().then(() => {
     if (!player) return false;
 
     if (move.type === 'SAY_MAU') {
-      // Handle Say Tek (Pis Yedili equivalent of Say Mau)
-      if (player.handCount === 1) {
+      // Handle Say Tek (Pis Yedili: must say TEK when you have 2 cards and are about to play one)
+      if (player.handCount === 2) {
         player.saidTek = true;
-        console.log(`🗣️ Player ${player.name} said Tek! (has ${player.handCount} card left)`);
+        console.log(`🗣️ Player ${player.name} said Tek! (has ${player.handCount} cards, preparing to play one)`);
+
+        // Announce TEK declaration
+        const announcement = `${player.name} said TEK!`;
+        io.to(gameState.roomId).emit('game-announcement', announcement);
+
         return true;
       } else {
-        console.log(`❌ Player ${player.name} tried to say Tek but has ${player.handCount} cards`);
+        console.log(`❌ Player ${player.name} tried to say Tek but has ${player.handCount} cards (must have exactly 2)`);
         return false;
       }
     } else if (move.type === 'PLAY_CARD') {
+      // Check TEK rule: if player has 2 cards and is playing one, they must have said TEK first
+      if (player.handCount === 2 && !player.saidTek) {
+        console.log(`❌ TEK VIOLATION: ${player.name} tried to play with 2 cards without saying TEK first!`);
+
+        // Penalty: draw one card from deck
+        if (ensureDeckHasCards(gameState, 1)) {
+          const penaltyCard = gameState.deck.pop();
+          if (penaltyCard) {
+            player.hand.push(penaltyCard);
+            player.handCount = player.hand.length;
+
+            // Announce the violation
+            const announcement = `${player.name} failed to say TEK and received a penalty card! Now has ${player.handCount} cards.`;
+            io.to(gameState.roomId).emit('game-announcement', announcement);
+            console.log(`🚨 TEK PENALTY: ${announcement}`);
+          }
+        }
+
+        return false; // Don't allow the card play
+      }
+
       // Remove card from player's hand
       const cardIndex = player.hand.findIndex(c => c.id === move.card.id);
       if (cardIndex === -1) return false;
-      
+
       player.hand.splice(cardIndex, 1);
       player.handCount = player.hand.length;
-      
+
+      // Reset TEK flag after playing a card (they now have to say it again when they get to 1 card)
+      player.saidTek = false;
+
       // Add card to discard pile
       gameState.discardPile.push(move.card);
       gameState.topCard = move.card;
-      
+
       // Handle special card effects
       handleSpecialCardEffect(gameState, move.card);
-      
+
       // Clear wild suit after playing a non-Jack card
       // (Wild suit only lasts until someone plays a matching card)
       if (move.card.rank !== 'J') {
         gameState.wildSuit = null;
       }
-      
+
       // Clear first play flag
       if (gameState.isFirstPlay) {
         gameState.isFirstPlay = false;
       }
-      
+
       // Move to next player
       nextPlayer(gameState);
-      
+
       return true;
     } else if (move.type === 'DRAW_CARD') {
       // Determine how many cards to draw

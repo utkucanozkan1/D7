@@ -29,11 +29,11 @@ export function Card({
   const getSizeClasses = () => {
     switch (size) {
       case 'small':
-        return 'w-12 h-16 text-xs';
+        return 'w-10 h-14 sm:w-12 sm:h-16 md:w-14 md:h-20 text-xs';
       case 'large':
-        return 'w-20 h-28 text-lg';
+        return 'w-16 h-24 sm:w-20 sm:h-30 md:w-24 md:h-36 text-sm sm:text-base md:text-lg';
       default:
-        return 'w-16 h-24 text-sm';
+        return 'w-12 h-18 sm:w-16 sm:h-24 md:w-18 md:h-28 text-xs sm:text-sm';
     }
   };
 
@@ -45,18 +45,18 @@ export function Card({
   const baseClasses = `
     ${getSizeClasses()}
     ${getColorClasses()}
-    bg-white rounded-lg border-2 border-gray-300
+    bg-white rounded-xl border-2 border-gray-200
     flex flex-col justify-between
     font-bold select-none
-    transition-all duration-200
-    shadow-md
+    playing-card
+    shadow-lg
     ${className}
   `;
 
   const interactionClasses = `
-    ${onClick && !disabled ? 'cursor-pointer hover:shadow-lg hover:-translate-y-1' : ''}
-    ${isPlayable ? 'ring-2 ring-green-400 ring-opacity-60' : ''}
-    ${isHighlighted ? 'ring-2 ring-yellow-400 ring-opacity-80 shadow-lg' : ''}
+    ${onClick && !disabled ? 'cursor-pointer card-hover' : ''}
+    ${isPlayable ? 'ring-2 ring-green-400 ring-opacity-60 card-playable' : ''}
+    ${isHighlighted ? 'ring-2 ring-yellow-400 ring-opacity-80 turn-indicator' : ''}
     ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
   `;
 
@@ -80,7 +80,7 @@ export function Card({
   }
 
   return (
-    <div 
+    <div
       className={`${baseClasses} ${interactionClasses}`}
       onClick={handleClick}
     >
@@ -107,11 +107,11 @@ export function Card({
 }
 
 // Card back component for deck
-export function CardBack({ 
-  size = 'medium', 
+export function CardBack({
+  size = 'medium',
   onClick,
-  className = '' 
-}: { 
+  className = ''
+}: {
   size?: 'small' | 'medium' | 'large';
   onClick?: () => void;
   className?: string;
@@ -119,25 +119,25 @@ export function CardBack({
   const getSizeClasses = () => {
     switch (size) {
       case 'small':
-        return 'w-12 h-16';
+        return 'w-10 h-14 sm:w-12 sm:h-16 md:w-14 md:h-20';
       case 'large':
-        return 'w-20 h-28';
+        return 'w-16 h-24 sm:w-20 sm:h-30 md:w-24 md:h-36';
       default:
-        return 'w-16 h-24';
+        return 'w-12 h-18 sm:w-16 sm:h-24 md:w-18 md:h-28';
     }
   };
 
   return (
-    <div 
+    <div
       className={`
         ${getSizeClasses()}
         bg-gradient-to-br from-blue-600 to-blue-800
-        rounded-lg border-2 border-blue-700
+        rounded-xl border-2 border-blue-700
         flex items-center justify-center
         font-bold select-none
-        transition-all duration-200
-        shadow-md
-        ${onClick ? 'cursor-pointer hover:shadow-lg hover:-translate-y-1' : ''}
+        playing-card
+        shadow-xl
+        ${onClick ? 'cursor-pointer card-hover' : ''}
         ${className}
       `}
       onClick={onClick}
@@ -148,11 +148,11 @@ export function CardBack({
 }
 
 // Empty slot component
-export function CardSlot({ 
-  size = 'medium', 
+export function CardSlot({
+  size = 'medium',
   className = '',
-  children 
-}: { 
+  children
+}: {
   size?: 'small' | 'medium' | 'large';
   className?: string;
   children?: React.ReactNode;
@@ -160,11 +160,11 @@ export function CardSlot({
   const getSizeClasses = () => {
     switch (size) {
       case 'small':
-        return 'w-12 h-16';
+        return 'w-10 h-14 sm:w-12 sm:h-16 md:w-14 md:h-20';
       case 'large':
-        return 'w-20 h-28';
+        return 'w-16 h-24 sm:w-20 sm:h-30 md:w-24 md:h-36';
       default:
-        return 'w-16 h-24';
+        return 'w-12 h-18 sm:w-16 sm:h-24 md:w-18 md:h-28';
     }
   };
 
